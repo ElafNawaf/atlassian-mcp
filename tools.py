@@ -653,6 +653,627 @@ def jira_rank_issues(issue_keys: list[str], rank_before_issue: str | None = None
 
 
 # ============================================================================
+# Jira Extended Tools (attachments, worklogs, watchers, links, versions,
+# components, archive, filters, bulk)
+# ============================================================================
+
+def _adf(text: str) -> dict:
+    return {"type": "doc", "version": 1, "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}]}
+
+
+def _require_jira() -> Any:
+    c = jira_client()
+    if not c:
+        raise ValueError("Jira not configured.")
+    return c
+
+
+def _require_jira_agile() -> Any:
+    c = jira_agile_client()
+    if not c:
+        raise ValueError("Jira not configured.")
+    return c
+
+
+def _dry(name: str, params: dict, execute: bool) -> dict | None:
+    if execute and not is_execute_allowed():
+        return {"dryRun": True, "message": "WORKGRAPH_MODE is DRY_RUN."}
+    if not execute:
+        audit_log(name, params, "success")
+        return {"dryRun": True, **params}
+    return None
+
+
+# ── Attachments ──────────────────────────────────────────────────────────────
+
+def jira_get_attachment(attachment_id: str) -> dict:
+    """Get attachment metadata by ID."""
+    if MOCK_MODE:
+        return {"id": attachment_id}
+    with _require_jira() as c:
+        r = c.get(f"/attachment/{attachment_id}")
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_delete_attachment(attachment_id: str, execute: bool = False) -> dict:
+    """Delete an attachment by ID."""
+    d = _dry("jira_delete_attachment", {"attachmentId": attachment_id}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"deleted": True}
+    with _require_jira() as c:
+        c.delete(f"/attachment/{attachment_id}").raise_for_status()
+    audit_log("jira_delete_attachment", {"attachmentId": attachment_id}, "success")
+    return {"deleted": True}
+
+
+def jira_get_attachment_meta() -> dict:
+    """Get Jira attachment capabilities (enabled, max upload size)."""
+    if MOCK_MODE:
+        return {"enabled": True}
+    with _require_jira() as c:
+        r = c.get("/attachment/meta")
+        r.raise_for_status()
+        return r.json()
+
+
+# ── Worklogs ─────────────────────────────────────────────────────────────────
+
+def jira_get_issue_worklogs(issue_key: str) -> dict:
+    """Get all worklogs for an issue."""
+    _allow_project(issue_key)
+    if MOCK_MODE:
+        return {"worklogs": []}
+    with _require_jira() as c:
+        r = c.get(f"/issue/{issue_key}/worklog")
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_add_issue_worklog(
+    issue_key: str, time_spent: str, comment: str = "", started: str | None = None,
+    execute: bool = False,
+) -> dict:
+    """Add a worklog entry (time_spent like '3h 20m', started ISO-8601)."""
+    _allow_project(issue_key)
+    d = _dry("jira_add_issue_worklog", {"issueKey": issue_key, "timeSpent": time_spent}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"created": True}
+    payload: dict[str, Any] = {"timeSpent": time_spent}
+    if comment:
+        payload["comment"] = _adf(comment)
+    if started:
+        payload["started"] = started
+    with _require_jira() as c:
+        r = c.post(f"/issue/{issue_key}/worklog", json=payload)
+        r.raise_for_status()
+    audit_log("jira_add_issue_worklog", {"issueKey": issue_key}, "success")
+    return {"created": True}
+
+
+def jira_update_issue_worklog(
+    issue_key: str, worklog_id: str, time_spent: str | None = None,
+    comment: str | None = None, execute: bool = False,
+) -> dict:
+    """Update a worklog entry."""
+    _allow_project(issue_key)
+    d = _dry("jira_update_issue_worklog", {"issueKey": issue_key, "worklogId": worklog_id}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"updated": True}
+    payload: dict[str, Any] = {}
+    if time_spent:
+        payload["timeSpent"] = time_spent
+    if comment:
+        payload["comment"] = _adf(comment)
+    with _require_jira() as c:
+        c.put(f"/issue/{issue_key}/worklog/{worklog_id}", json=payload).raise_for_status()
+    audit_log("jira_update_issue_worklog", {"issueKey": issue_key, "worklogId": worklog_id}, "success")
+    return {"updated": True}
+
+
+def jira_delete_issue_worklog(issue_key: str, worklog_id: str, execute: bool = False) -> dict:
+    """Delete a worklog entry."""
+    _allow_project(issue_key)
+    d = _dry("jira_delete_issue_worklog", {"issueKey": issue_key, "worklogId": worklog_id}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"deleted": True}
+    with _require_jira() as c:
+        c.delete(f"/issue/{issue_key}/worklog/{worklog_id}").raise_for_status()
+    audit_log("jira_delete_issue_worklog", {"issueKey": issue_key, "worklogId": worklog_id}, "success")
+    return {"deleted": True}
+
+
+# ── Watchers ─────────────────────────────────────────────────────────────────
+
+def jira_get_issue_watchers(issue_key: str) -> dict:
+    """Get watchers for an issue."""
+    _allow_project(issue_key)
+    if MOCK_MODE:
+        return {"watchers": []}
+    with _require_jira() as c:
+        r = c.get(f"/issue/{issue_key}/watchers")
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_add_issue_watcher(issue_key: str, username: str, execute: bool = False) -> dict:
+    """Add a watcher to an issue (username or accountId depending on Jira flavor)."""
+    _allow_project(issue_key)
+    d = _dry("jira_add_issue_watcher", {"issueKey": issue_key, "username": username}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"added": True}
+    with _require_jira() as c:
+        c.post(f"/issue/{issue_key}/watchers", json=username).raise_for_status()
+    audit_log("jira_add_issue_watcher", {"issueKey": issue_key}, "success")
+    return {"added": True}
+
+
+def jira_remove_issue_watcher(issue_key: str, username: str, execute: bool = False) -> dict:
+    """Remove a watcher from an issue."""
+    _allow_project(issue_key)
+    d = _dry("jira_remove_issue_watcher", {"issueKey": issue_key, "username": username}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"removed": True}
+    with _require_jira() as c:
+        c.delete(f"/issue/{issue_key}/watchers", params={"username": username}).raise_for_status()
+    audit_log("jira_remove_issue_watcher", {"issueKey": issue_key}, "success")
+    return {"removed": True}
+
+
+# ── Issue Links ──────────────────────────────────────────────────────────────
+
+def jira_get_issue_link_types() -> dict:
+    """List available issue link types."""
+    if MOCK_MODE:
+        return {"issueLinkTypes": []}
+    with _require_jira() as c:
+        r = c.get("/issueLinkType")
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_create_issue_link(
+    link_type: str, inward_issue: str, outward_issue: str,
+    comment: str | None = None, execute: bool = False,
+) -> dict:
+    """Link two issues (e.g. 'Blocks', 'Relates')."""
+    _allow_project(inward_issue)
+    _allow_project(outward_issue)
+    d = _dry("jira_create_issue_link", {"linkType": link_type, "inward": inward_issue, "outward": outward_issue}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"created": True}
+    payload: dict[str, Any] = {
+        "type": {"name": link_type},
+        "inwardIssue": {"key": inward_issue},
+        "outwardIssue": {"key": outward_issue},
+    }
+    if comment:
+        payload["comment"] = {"body": _adf(comment)}
+    with _require_jira() as c:
+        c.post("/issueLink", json=payload).raise_for_status()
+    audit_log("jira_create_issue_link", {"inward": inward_issue, "outward": outward_issue}, "success")
+    return {"created": True}
+
+
+def jira_get_issue_link(link_id: str) -> dict:
+    """Get an issue link by ID."""
+    if MOCK_MODE:
+        return {"id": link_id}
+    with _require_jira() as c:
+        r = c.get(f"/issueLink/{link_id}")
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_delete_issue_link(link_id: str, execute: bool = False) -> dict:
+    """Delete an issue link by ID."""
+    d = _dry("jira_delete_issue_link", {"linkId": link_id}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"deleted": True}
+    with _require_jira() as c:
+        c.delete(f"/issueLink/{link_id}").raise_for_status()
+    audit_log("jira_delete_issue_link", {"linkId": link_id}, "success")
+    return {"deleted": True}
+
+
+# ── Remote Links ─────────────────────────────────────────────────────────────
+
+def jira_get_issue_remote_links(issue_key: str) -> dict:
+    """Get all remote links on an issue."""
+    _allow_project(issue_key)
+    if MOCK_MODE:
+        return {"remoteLinks": []}
+    with _require_jira() as c:
+        r = c.get(f"/issue/{issue_key}/remotelink")
+        r.raise_for_status()
+        return {"remoteLinks": r.json()}
+
+
+def jira_create_issue_remote_link(
+    issue_key: str, url: str, title: str, summary: str | None = None,
+    global_id: str | None = None, execute: bool = False,
+) -> dict:
+    """Create or update a remote link on an issue."""
+    _allow_project(issue_key)
+    d = _dry("jira_create_issue_remote_link", {"issueKey": issue_key, "url": url}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"created": True}
+    payload: dict[str, Any] = {"object": {"url": url, "title": title}}
+    if summary:
+        payload["object"]["summary"] = summary
+    if global_id:
+        payload["globalId"] = global_id
+    with _require_jira() as c:
+        r = c.post(f"/issue/{issue_key}/remotelink", json=payload)
+        r.raise_for_status()
+    audit_log("jira_create_issue_remote_link", {"issueKey": issue_key}, "success")
+    return r.json() if r.content else {"created": True}
+
+
+def jira_delete_issue_remote_link(issue_key: str, link_id: str, execute: bool = False) -> dict:
+    """Delete a remote link from an issue."""
+    _allow_project(issue_key)
+    d = _dry("jira_delete_issue_remote_link", {"issueKey": issue_key, "linkId": link_id}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"deleted": True}
+    with _require_jira() as c:
+        c.delete(f"/issue/{issue_key}/remotelink/{link_id}").raise_for_status()
+    audit_log("jira_delete_issue_remote_link", {"issueKey": issue_key, "linkId": link_id}, "success")
+    return {"deleted": True}
+
+
+# ── Versions ─────────────────────────────────────────────────────────────────
+
+def jira_get_project_versions(project_key: str) -> dict:
+    """Get all versions for a project."""
+    _allow_project(project_key)
+    if MOCK_MODE:
+        return {"versions": []}
+    with _require_jira() as c:
+        r = c.get(f"/project/{project_key}/versions")
+        r.raise_for_status()
+        return {"versions": r.json()}
+
+
+def jira_get_version(version_id: str) -> dict:
+    """Get a version by ID."""
+    if MOCK_MODE:
+        return {"id": version_id}
+    with _require_jira() as c:
+        r = c.get(f"/version/{version_id}")
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_create_version(
+    project_key: str, name: str, description: str = "",
+    release_date: str | None = None, released: bool = False, execute: bool = False,
+) -> dict:
+    """Create a version in a project."""
+    _allow_project(project_key)
+    d = _dry("jira_create_version", {"project": project_key, "name": name}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"created": True, "name": name}
+    payload: dict[str, Any] = {"name": name, "project": project_key, "released": released}
+    if description:
+        payload["description"] = description
+    if release_date:
+        payload["releaseDate"] = release_date
+    with _require_jira() as c:
+        r = c.post("/version", json=payload)
+        r.raise_for_status()
+    audit_log("jira_create_version", {"project": project_key, "name": name}, "success")
+    return r.json()
+
+
+def jira_update_version(
+    version_id: str, name: str | None = None, description: str | None = None,
+    release_date: str | None = None, released: bool | None = None, execute: bool = False,
+) -> dict:
+    """Update a version."""
+    d = _dry("jira_update_version", {"versionId": version_id}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"updated": True}
+    payload: dict[str, Any] = {}
+    if name is not None:
+        payload["name"] = name
+    if description is not None:
+        payload["description"] = description
+    if release_date is not None:
+        payload["releaseDate"] = release_date
+    if released is not None:
+        payload["released"] = released
+    with _require_jira() as c:
+        r = c.put(f"/version/{version_id}", json=payload)
+        r.raise_for_status()
+    audit_log("jira_update_version", {"versionId": version_id}, "success")
+    return r.json()
+
+
+def jira_delete_version(version_id: str, execute: bool = False) -> dict:
+    """Delete a version."""
+    d = _dry("jira_delete_version", {"versionId": version_id}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"deleted": True}
+    with _require_jira() as c:
+        c.delete(f"/version/{version_id}").raise_for_status()
+    audit_log("jira_delete_version", {"versionId": version_id}, "success")
+    return {"deleted": True}
+
+
+# ── Components ───────────────────────────────────────────────────────────────
+
+def jira_get_project_components(project_key: str) -> dict:
+    """Get all components for a project."""
+    _allow_project(project_key)
+    if MOCK_MODE:
+        return {"components": []}
+    with _require_jira() as c:
+        r = c.get(f"/project/{project_key}/components")
+        r.raise_for_status()
+        return {"components": r.json()}
+
+
+def jira_get_component(component_id: str) -> dict:
+    """Get a component by ID."""
+    if MOCK_MODE:
+        return {"id": component_id}
+    with _require_jira() as c:
+        r = c.get(f"/component/{component_id}")
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_create_component(
+    project_key: str, name: str, description: str = "",
+    lead: str | None = None, execute: bool = False,
+) -> dict:
+    """Create a component in a project."""
+    _allow_project(project_key)
+    d = _dry("jira_create_component", {"project": project_key, "name": name}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"created": True, "name": name}
+    payload: dict[str, Any] = {"name": name, "project": project_key}
+    if description:
+        payload["description"] = description
+    if lead:
+        payload["leadUserName"] = lead
+    with _require_jira() as c:
+        r = c.post("/component", json=payload)
+        r.raise_for_status()
+    audit_log("jira_create_component", {"project": project_key, "name": name}, "success")
+    return r.json()
+
+
+def jira_update_component(
+    component_id: str, name: str | None = None, description: str | None = None,
+    lead: str | None = None, execute: bool = False,
+) -> dict:
+    """Update a component."""
+    d = _dry("jira_update_component", {"componentId": component_id}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"updated": True}
+    payload: dict[str, Any] = {}
+    if name is not None:
+        payload["name"] = name
+    if description is not None:
+        payload["description"] = description
+    if lead is not None:
+        payload["leadUserName"] = lead
+    with _require_jira() as c:
+        r = c.put(f"/component/{component_id}", json=payload)
+        r.raise_for_status()
+    audit_log("jira_update_component", {"componentId": component_id}, "success")
+    return r.json()
+
+
+def jira_delete_component(component_id: str, execute: bool = False) -> dict:
+    """Delete a component."""
+    d = _dry("jira_delete_component", {"componentId": component_id}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"deleted": True}
+    with _require_jira() as c:
+        c.delete(f"/component/{component_id}").raise_for_status()
+    audit_log("jira_delete_component", {"componentId": component_id}, "success")
+    return {"deleted": True}
+
+
+# ── Assign, Transitions list, Issue-type metadata, Archive ───────────────────
+
+def jira_assign_issue(issue_key: str, assignee: str | None, execute: bool = False) -> dict:
+    """Assign an issue (null/'-1' to unassign, '-1' for default assignee)."""
+    _allow_project(issue_key)
+    d = _dry("jira_assign_issue", {"issueKey": issue_key, "assignee": assignee}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"assigned": True}
+    with _require_jira() as c:
+        c.put(f"/issue/{issue_key}/assignee", json={"name": assignee}).raise_for_status()
+    audit_log("jira_assign_issue", {"issueKey": issue_key}, "success")
+    return {"assigned": True}
+
+
+def jira_list_transitions(issue_key: str) -> dict:
+    """List available workflow transitions for an issue."""
+    _allow_project(issue_key)
+    if MOCK_MODE:
+        return {"transitions": []}
+    with _require_jira() as c:
+        r = c.get(f"/issue/{issue_key}/transitions")
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_get_createmeta(project_key: str | None = None, issue_type_names: str | None = None) -> dict:
+    """Get metadata for creating issues (projects, issue types, required fields)."""
+    params: dict[str, Any] = {"expand": "projects.issuetypes.fields"}
+    if project_key:
+        _allow_project(project_key)
+        params["projectKeys"] = project_key
+    if issue_type_names:
+        params["issuetypeNames"] = issue_type_names
+    if MOCK_MODE:
+        return {"projects": []}
+    with _require_jira() as c:
+        r = c.get("/issue/createmeta", params=params)
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_bulk_create_issues(issues: list[dict], execute: bool = False) -> dict:
+    """Create multiple issues in one request. Each entry: {fields: {...}}."""
+    d = _dry("jira_bulk_create_issues", {"count": len(issues)}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"created": len(issues)}
+    with _require_jira() as c:
+        r = c.post("/issue/bulk", json={"issueUpdates": issues})
+        r.raise_for_status()
+    audit_log("jira_bulk_create_issues", {"count": len(issues)}, "success")
+    return r.json()
+
+
+def jira_archive_issue(issue_key: str, execute: bool = False) -> dict:
+    """Archive a single issue."""
+    _allow_project(issue_key)
+    d = _dry("jira_archive_issue", {"issueKey": issue_key}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"archived": True}
+    with _require_jira() as c:
+        c.put(f"/issue/{issue_key}/archive").raise_for_status()
+    audit_log("jira_archive_issue", {"issueKey": issue_key}, "success")
+    return {"archived": True}
+
+
+def jira_restore_issue(issue_key: str, execute: bool = False) -> dict:
+    """Restore an archived issue."""
+    _allow_project(issue_key)
+    d = _dry("jira_restore_issue", {"issueKey": issue_key}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"restored": True}
+    with _require_jira() as c:
+        c.put(f"/issue/{issue_key}/restore").raise_for_status()
+    audit_log("jira_restore_issue", {"issueKey": issue_key}, "success")
+    return {"restored": True}
+
+
+# ── Filters ──────────────────────────────────────────────────────────────────
+
+def jira_get_filter(filter_id: str) -> dict:
+    """Get a Jira filter by ID."""
+    if MOCK_MODE:
+        return {"id": filter_id}
+    with _require_jira() as c:
+        r = c.get(f"/filter/{filter_id}")
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_get_favourite_filters() -> dict:
+    """Get the current user's favourite filters."""
+    if MOCK_MODE:
+        return {"filters": []}
+    with _require_jira() as c:
+        r = c.get("/filter/favourite")
+        r.raise_for_status()
+        return {"filters": r.json()}
+
+
+def jira_create_filter(
+    name: str, jql: str, description: str = "", favourite: bool = False, execute: bool = False,
+) -> dict:
+    """Create a saved JQL filter."""
+    d = _dry("jira_create_filter", {"name": name}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"created": True, "name": name}
+    payload: dict[str, Any] = {"name": name, "jql": jql, "favourite": favourite}
+    if description:
+        payload["description"] = description
+    with _require_jira() as c:
+        r = c.post("/filter", json=payload)
+        r.raise_for_status()
+    audit_log("jira_create_filter", {"name": name}, "success")
+    return r.json()
+
+
+def jira_update_filter(
+    filter_id: str, name: str | None = None, jql: str | None = None,
+    description: str | None = None, execute: bool = False,
+) -> dict:
+    """Update a saved filter."""
+    d = _dry("jira_update_filter", {"filterId": filter_id}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"updated": True}
+    payload: dict[str, Any] = {}
+    if name is not None:
+        payload["name"] = name
+    if jql is not None:
+        payload["jql"] = jql
+    if description is not None:
+        payload["description"] = description
+    with _require_jira() as c:
+        r = c.put(f"/filter/{filter_id}", json=payload)
+        r.raise_for_status()
+    audit_log("jira_update_filter", {"filterId": filter_id}, "success")
+    return r.json()
+
+
+def jira_delete_filter(filter_id: str, execute: bool = False) -> dict:
+    """Delete a saved filter."""
+    d = _dry("jira_delete_filter", {"filterId": filter_id}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"deleted": True}
+    with _require_jira() as c:
+        c.delete(f"/filter/{filter_id}").raise_for_status()
+    audit_log("jira_delete_filter", {"filterId": filter_id}, "success")
+    return {"deleted": True}
+
+
+# ============================================================================
 # Bitbucket Tools
 # ============================================================================
 
@@ -1140,3 +1761,71 @@ def bamboo_get_build_log(build_key: str) -> dict:
         log_text = r.text
     audit_log("bamboo_get_build_log", {"build_key": build_key}, "success")
     return {"buildKey": build_key, "log": log_text}
+
+
+# ============================================================================
+# Raw passthrough tools — full API coverage for advanced/niche endpoints
+# ============================================================================
+
+_WRITE_METHODS = {"POST", "PUT", "DELETE", "PATCH"}
+
+
+def _raw_call(client: Any, method: str, path: str, params: dict | None, body: Any) -> dict:
+    method = method.upper()
+    if not path.startswith("/"):
+        path = "/" + path
+    with client as c:
+        r = c.request(method, path, params=params, json=body if body is not None else None)
+        r.raise_for_status()
+        if not r.content:
+            return {"status": r.status_code}
+        try:
+            return r.json() if isinstance(r.json(), dict) else {"data": r.json()}
+        except Exception:
+            return {"status": r.status_code, "text": r.text}
+
+
+def _raw(name: str, client_factory, method: str, path: str,
+         params: dict | None, body: Any, execute: bool) -> dict:
+    method = method.upper()
+    is_write = method in _WRITE_METHODS
+    if is_write:
+        if execute and not is_execute_allowed():
+            return {"dryRun": True, "message": "WORKGRAPH_MODE is DRY_RUN."}
+        if not execute:
+            audit_log(name, {"method": method, "path": path}, "success")
+            return {"dryRun": True, "method": method, "path": path, "params": params, "body": body}
+    if MOCK_MODE:
+        return {"mock": True, "method": method, "path": path}
+    client = client_factory()
+    if not client:
+        raise ValueError(f"{name} client not configured.")
+    result = _raw_call(client, method, path, params, body)
+    if is_write:
+        audit_log(name, {"method": method, "path": path}, "success")
+    return result
+
+
+def jira_raw(method: str, path: str, params: dict | None = None,
+             body: Any = None, agile: bool = False, execute: bool = False) -> dict:
+    """Call any Jira REST endpoint. path is relative to /rest/api/{version} (or /rest/agile/1.0 if agile=true)."""
+    factory = jira_agile_client if agile else jira_client
+    return _raw("jira_raw", factory, method, path, params, body, execute)
+
+
+def bitbucket_raw(method: str, path: str, params: dict | None = None,
+                  body: Any = None, execute: bool = False) -> dict:
+    """Call any Bitbucket REST endpoint. path is relative to the Bitbucket API base."""
+    return _raw("bitbucket_raw", bitbucket_client, method, path, params, body, execute)
+
+
+def confluence_raw(method: str, path: str, params: dict | None = None,
+                   body: Any = None, execute: bool = False) -> dict:
+    """Call any Confluence REST endpoint. path is relative to /rest/api."""
+    return _raw("confluence_raw", confluence_client, method, path, params, body, execute)
+
+
+def bamboo_raw(method: str, path: str, params: dict | None = None,
+               body: Any = None, execute: bool = False) -> dict:
+    """Call any Bamboo REST endpoint. path is relative to /rest/api/latest."""
+    return _raw("bamboo_raw", bamboo_client, method, path, params, body, execute)
