@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "atlassian": {
+      "command": "python",
+      "args": ["/Users/elafnawaf/PycharmProjects/atlassian-mcp/server.py"]
+    }
+  }
+}

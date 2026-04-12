@@ -1,0 +1,9 @@
+.env
+mcp-bridge.sh
+__pycache__/
+*.pyc
+audit.log.jsonl
+*.log
+.venv/
+venv/
+.claude/

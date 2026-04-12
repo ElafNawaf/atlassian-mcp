@@ -1,0 +1,12 @@
+services:
+  atlassian-mcp:
+    build: .
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    environment:
+      - MCP_TRANSPORT=streamable-http
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8001
+    restart: unless-stopped
