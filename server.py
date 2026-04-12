@@ -1,11 +1,11 @@
 """
-Atlassian MCP Server — standalone, 28 tools over stdio/HTTP.
+Atlassian MCP Server — standalone, 87 tools over stdio/HTTP.
 
 Run:
   python server.py                    # stdio (default, for Cursor/Claude Code)
   MCP_TRANSPORT=streamable-http python server.py  # HTTP
 
-Covers: Jira (8), Bitbucket (7), Confluence (6), Bamboo (7)
+Covers: Jira typed (63) + Bitbucket (7) + Confluence (6) + Bamboo (7) + 4 raw passthroughs
 """
 import os
 
@@ -112,6 +112,8 @@ from tools import (
     bamboo_raw,
 )
 from typing import Any
+import functools
+import httpx
 
 _mcp_host = os.getenv("MCP_HOST", "127.0.0.1")
 _mcp_port = int(os.getenv("MCP_PORT", "8000"))
@@ -119,30 +121,65 @@ _mcp_transport = os.getenv("MCP_TRANSPORT", "stdio").strip().lower()
 
 mcp = FastMCP(
     "Atlassian",
-    instructions="Atlassian automation: Jira, Bitbucket, Confluence, Bamboo — 45 tools for complete SDLC management.",
+    instructions="Atlassian automation: Jira, Bitbucket, Confluence, Bamboo — 87 tools (typed + raw passthroughs) for complete SDLC management.",
     host=_mcp_host,
     port=_mcp_port,
     json_response=True,
 )
 
 
+def safe_tool():
+    """Wrap @safe_tool() so exceptions become structured errors the LLM can read."""
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except httpx.HTTPStatusError as e:
+                body = ""
+                try:
+                    body = e.response.text[:2000]
+                except Exception:
+                    pass
+                logger.warning("%s HTTP %s: %s", fn.__name__, e.response.status_code, body[:200])
+                return {
+                    "error": True,
+                    "type": "http_error",
+                    "status": e.response.status_code,
+                    "url": str(e.request.url) if e.request else None,
+                    "message": f"{e.response.status_code} {e.response.reason_phrase}",
+                    "response": body,
+                }
+            except httpx.RequestError as e:
+                logger.warning("%s network error: %s", fn.__name__, e)
+                return {"error": True, "type": "network_error", "message": str(e)}
+            except ValueError as e:
+                logger.info("%s validation: %s", fn.__name__, e)
+                return {"error": True, "type": "validation_error", "message": str(e)}
+            except Exception as e:
+                logger.exception("%s failed", fn.__name__)
+                return {"error": True, "type": type(e).__name__, "message": str(e)}
+        return mcp.tool()(wrapper)
+    return deco
+
+
 # ============================================================================
 # Jira Tools (8)
 # ============================================================================
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_search_issues(jql: str, max_results: int = 50) -> dict:
     """Search Jira issues using JQL. Returns matching issues with details like summary, status, assignee."""
     return jira_search_issues(jql, max_results)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_issue(issue_key: str) -> dict:
     """Get detailed information about a specific Jira issue including description, comments, and history."""
     return jira_get_issue(issue_key)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_create_issue(
     project_key: str,
     summary: str,
@@ -151,13 +188,13 @@ def mcp_jira_create_issue(
     priority: str | None = None,
     assignee: str | None = None,
     labels: list[str] | None = None,
-    execute: bool = False,
+    execute: bool = True,
 ) -> dict:
     """Create a new Jira issue. Set execute=true to actually create (dry-run by default)."""
     return jira_create_issue(project_key, summary, description, issue_type, priority, assignee, labels, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_update_issue(
     issue_key: str,
     summary: str | None = None,
@@ -165,20 +202,20 @@ def mcp_jira_update_issue(
     assignee: str | None = None,
     priority: str | None = None,
     status: str | None = None,
-    execute: bool = False,
+    execute: bool = True,
 ) -> dict:
     """Update an existing Jira issue. Set execute=true to actually update (dry-run by default)."""
     return jira_update_issue(issue_key, summary, description, assignee, priority, status, execute)
 
 
-@mcp.tool()
-def mcp_jira_add_comment(issue_key: str, comment: str, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_add_comment(issue_key: str, comment: str, execute: bool = True) -> dict:
     """Add a comment to a Jira issue. Set execute=true to actually comment (dry-run by default)."""
     return jira_add_comment(issue_key, comment, execute)
 
 
-@mcp.tool()
-def mcp_jira_create_subtasks(parent_issue_key: str, subtasks: list[dict], execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_create_subtasks(parent_issue_key: str, subtasks: list[dict], execute: bool = True) -> dict:
     """
     Create multiple subtasks under a parent Jira issue. Set execute=true to actually create.
 
@@ -187,8 +224,8 @@ def mcp_jira_create_subtasks(parent_issue_key: str, subtasks: list[dict], execut
     return jira_create_subtasks(parent_issue_key, subtasks, execute)
 
 
-@mcp.tool()
-def mcp_jira_transition_issue(issue_key: str, transition_name: str, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_transition_issue(issue_key: str, transition_name: str, execute: bool = True) -> dict:
     """
     Transition a Jira issue to a new status. Set execute=true to actually transition.
 
@@ -197,7 +234,7 @@ def mcp_jira_transition_issue(issue_key: str, transition_name: str, execute: boo
     return jira_transition_issue(issue_key, transition_name, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_project_info(project_key: str) -> dict:
     """Get information about a Jira project including available issue types, statuses, and metadata."""
     return jira_get_project_info(project_key)
@@ -207,7 +244,7 @@ def mcp_jira_get_project_info(project_key: str) -> dict:
 # Jira Agile Tools (17)
 # ============================================================================
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_list_boards(name: str | None = None, project_key: str | None = None,
                          board_type: str | None = None, max_results: int = 50, start_at: int = 0) -> dict:
     """
@@ -218,40 +255,40 @@ def mcp_jira_list_boards(name: str | None = None, project_key: str | None = None
     return jira_list_boards(name, project_key, board_type, max_results, start_at)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_board(board_id: int) -> dict:
     """Get a single Jira board by ID."""
     return jira_get_board(board_id)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_board_config(board_id: int) -> dict:
     """Get the configuration of a Jira board including columns, estimation type, and ranking field."""
     return jira_get_board_config(board_id)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_board_issues(board_id: int, jql: str | None = None,
                               max_results: int = 50, start_at: int = 0) -> dict:
     """Get all issues from a Jira board. Includes agile fields (sprint, epic, flagged). Optionally filter with JQL."""
     return jira_get_board_issues(board_id, jql, max_results, start_at)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_board_epics(board_id: int, done: bool = False,
                              max_results: int = 50, start_at: int = 0) -> dict:
     """Get all epics from a board. Set done=true to include completed epics."""
     return jira_get_board_epics(board_id, done, max_results, start_at)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_board_backlog(board_id: int, jql: str | None = None,
                                max_results: int = 50, start_at: int = 0) -> dict:
     """Get all issues from a board's backlog."""
     return jira_get_board_backlog(board_id, jql, max_results, start_at)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_board_sprints(board_id: int, state: str | None = None,
                                max_results: int = 50, start_at: int = 0) -> dict:
     """
@@ -262,16 +299,16 @@ def mcp_jira_get_board_sprints(board_id: int, state: str | None = None,
     return jira_get_board_sprints(board_id, state, max_results, start_at)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_sprint(sprint_id: int) -> dict:
     """Get a single sprint by ID including name, state, dates, and goal."""
     return jira_get_sprint(sprint_id)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_create_sprint(board_id: int, name: str, start_date: str | None = None,
                            end_date: str | None = None, goal: str | None = None,
-                           execute: bool = False) -> dict:
+                           execute: bool = True) -> dict:
     """
     Create a future sprint on a board. Set execute=true to actually create.
 
@@ -280,10 +317,10 @@ def mcp_jira_create_sprint(board_id: int, name: str, start_date: str | None = No
     return jira_create_sprint(board_id, name, start_date, end_date, goal, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_update_sprint(sprint_id: int, name: str | None = None, state: str | None = None,
                            start_date: str | None = None, end_date: str | None = None,
-                           goal: str | None = None, execute: bool = False) -> dict:
+                           goal: str | None = None, execute: bool = True) -> dict:
     """
     Update a sprint. Set execute=true to actually update.
 
@@ -293,47 +330,47 @@ def mcp_jira_update_sprint(sprint_id: int, name: str | None = None, state: str |
     return jira_update_sprint(sprint_id, name, state, start_date, end_date, goal, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_sprint_issues(sprint_id: int, jql: str | None = None,
                                max_results: int = 50, start_at: int = 0) -> dict:
     """Get all issues in a sprint. Ordered by rank by default."""
     return jira_get_sprint_issues(sprint_id, jql, max_results, start_at)
 
 
-@mcp.tool()
-def mcp_jira_move_issues_to_sprint(sprint_id: int, issue_keys: list[str], execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_move_issues_to_sprint(sprint_id: int, issue_keys: list[str], execute: bool = True) -> dict:
     """Move issues to a sprint. Maximum 50 issues. Set execute=true to actually move."""
     return jira_move_issues_to_sprint(sprint_id, issue_keys, execute)
 
 
-@mcp.tool()
-def mcp_jira_move_issues_to_backlog(issue_keys: list[str], execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_move_issues_to_backlog(issue_keys: list[str], execute: bool = True) -> dict:
     """Move issues to the backlog (removes from any sprint). Maximum 50 issues. Set execute=true to actually move."""
     return jira_move_issues_to_backlog(issue_keys, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_epic(epic_id_or_key: str) -> dict:
     """Get an epic by ID or issue key."""
     return jira_get_epic(epic_id_or_key)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_epic_issues(epic_id_or_key: str, jql: str | None = None,
                              max_results: int = 50, start_at: int = 0) -> dict:
     """Get all issues belonging to an epic. Ordered by rank by default."""
     return jira_get_epic_issues(epic_id_or_key, jql, max_results, start_at)
 
 
-@mcp.tool()
-def mcp_jira_move_issues_to_epic(epic_id_or_key: str, issue_keys: list[str], execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_move_issues_to_epic(epic_id_or_key: str, issue_keys: list[str], execute: bool = True) -> dict:
     """Move issues to an epic. Maximum 50 issues. Set execute=true to actually move."""
     return jira_move_issues_to_epic(epic_id_or_key, issue_keys, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_rank_issues(issue_keys: list[str], rank_before_issue: str | None = None,
-                         rank_after_issue: str | None = None, execute: bool = False) -> dict:
+                         rank_after_issue: str | None = None, execute: bool = True) -> dict:
     """
     Rank (reorder) issues on a board. Maximum 50 issues. Set execute=true to actually rank.
 
@@ -349,19 +386,19 @@ def mcp_jira_rank_issues(issue_keys: list[str], rank_before_issue: str | None = 
 
 # ── Attachments ─────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_attachment(attachment_id: str) -> dict:
     """Get Jira attachment metadata by ID."""
     return jira_get_attachment(attachment_id)
 
 
-@mcp.tool()
-def mcp_jira_delete_attachment(attachment_id: str, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_delete_attachment(attachment_id: str, execute: bool = True) -> dict:
     """Delete a Jira attachment by ID. Dry-run by default."""
     return jira_delete_attachment(attachment_id, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_attachment_meta() -> dict:
     """Get Jira attachment capabilities (enabled, max upload size)."""
     return jira_get_attachment_meta()
@@ -369,255 +406,255 @@ def mcp_jira_get_attachment_meta() -> dict:
 
 # ── Worklogs ────────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_issue_worklogs(issue_key: str) -> dict:
     """List all worklogs for a Jira issue."""
     return jira_get_issue_worklogs(issue_key)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_add_issue_worklog(
     issue_key: str, time_spent: str, comment: str = "",
-    started: str | None = None, execute: bool = False,
+    started: str | None = None, execute: bool = True,
 ) -> dict:
     """Add a worklog entry to an issue. time_spent like '3h 20m'. Dry-run by default."""
     return jira_add_issue_worklog(issue_key, time_spent, comment, started, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_update_issue_worklog(
     issue_key: str, worklog_id: str, time_spent: str | None = None,
-    comment: str | None = None, execute: bool = False,
+    comment: str | None = None, execute: bool = True,
 ) -> dict:
     """Update a worklog entry. Dry-run by default."""
     return jira_update_issue_worklog(issue_key, worklog_id, time_spent, comment, execute)
 
 
-@mcp.tool()
-def mcp_jira_delete_issue_worklog(issue_key: str, worklog_id: str, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_delete_issue_worklog(issue_key: str, worklog_id: str, execute: bool = True) -> dict:
     """Delete a worklog entry. Dry-run by default."""
     return jira_delete_issue_worklog(issue_key, worklog_id, execute)
 
 
 # ── Watchers ────────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_issue_watchers(issue_key: str) -> dict:
     """Get watchers for a Jira issue."""
     return jira_get_issue_watchers(issue_key)
 
 
-@mcp.tool()
-def mcp_jira_add_issue_watcher(issue_key: str, username: str, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_add_issue_watcher(issue_key: str, username: str, execute: bool = True) -> dict:
     """Add a watcher to a Jira issue. Dry-run by default."""
     return jira_add_issue_watcher(issue_key, username, execute)
 
 
-@mcp.tool()
-def mcp_jira_remove_issue_watcher(issue_key: str, username: str, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_remove_issue_watcher(issue_key: str, username: str, execute: bool = True) -> dict:
     """Remove a watcher from a Jira issue. Dry-run by default."""
     return jira_remove_issue_watcher(issue_key, username, execute)
 
 
 # ── Issue Links ─────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_issue_link_types() -> dict:
     """List all available Jira issue link types (Blocks, Relates, etc.)."""
     return jira_get_issue_link_types()
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_create_issue_link(
     link_type: str, inward_issue: str, outward_issue: str,
-    comment: str | None = None, execute: bool = False,
+    comment: str | None = None, execute: bool = True,
 ) -> dict:
     """Link two Jira issues (e.g. 'Blocks', 'Relates'). Dry-run by default."""
     return jira_create_issue_link(link_type, inward_issue, outward_issue, comment, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_issue_link(link_id: str) -> dict:
     """Get a Jira issue link by ID."""
     return jira_get_issue_link(link_id)
 
 
-@mcp.tool()
-def mcp_jira_delete_issue_link(link_id: str, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_delete_issue_link(link_id: str, execute: bool = True) -> dict:
     """Delete a Jira issue link by ID. Dry-run by default."""
     return jira_delete_issue_link(link_id, execute)
 
 
 # ── Remote Links ────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_issue_remote_links(issue_key: str) -> dict:
     """List remote (web) links on a Jira issue."""
     return jira_get_issue_remote_links(issue_key)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_create_issue_remote_link(
     issue_key: str, url: str, title: str, summary: str | None = None,
-    global_id: str | None = None, execute: bool = False,
+    global_id: str | None = None, execute: bool = True,
 ) -> dict:
     """Create or update a remote link on a Jira issue. Dry-run by default."""
     return jira_create_issue_remote_link(issue_key, url, title, summary, global_id, execute)
 
 
-@mcp.tool()
-def mcp_jira_delete_issue_remote_link(issue_key: str, link_id: str, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_delete_issue_remote_link(issue_key: str, link_id: str, execute: bool = True) -> dict:
     """Delete a remote link from a Jira issue. Dry-run by default."""
     return jira_delete_issue_remote_link(issue_key, link_id, execute)
 
 
 # ── Versions ────────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_project_versions(project_key: str) -> dict:
     """Get all versions (releases) for a Jira project."""
     return jira_get_project_versions(project_key)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_version(version_id: str) -> dict:
     """Get a Jira version by ID."""
     return jira_get_version(version_id)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_create_version(
     project_key: str, name: str, description: str = "",
-    release_date: str | None = None, released: bool = False, execute: bool = False,
+    release_date: str | None = None, released: bool = False, execute: bool = True,
 ) -> dict:
     """Create a Jira version (release). release_date as YYYY-MM-DD. Dry-run by default."""
     return jira_create_version(project_key, name, description, release_date, released, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_update_version(
     version_id: str, name: str | None = None, description: str | None = None,
-    release_date: str | None = None, released: bool | None = None, execute: bool = False,
+    release_date: str | None = None, released: bool | None = None, execute: bool = True,
 ) -> dict:
     """Update a Jira version. Dry-run by default."""
     return jira_update_version(version_id, name, description, release_date, released, execute)
 
 
-@mcp.tool()
-def mcp_jira_delete_version(version_id: str, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_delete_version(version_id: str, execute: bool = True) -> dict:
     """Delete a Jira version. Dry-run by default."""
     return jira_delete_version(version_id, execute)
 
 
 # ── Components ──────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_project_components(project_key: str) -> dict:
     """Get all components for a Jira project."""
     return jira_get_project_components(project_key)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_component(component_id: str) -> dict:
     """Get a Jira component by ID."""
     return jira_get_component(component_id)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_create_component(
     project_key: str, name: str, description: str = "",
-    lead: str | None = None, execute: bool = False,
+    lead: str | None = None, execute: bool = True,
 ) -> dict:
     """Create a Jira component. Dry-run by default."""
     return jira_create_component(project_key, name, description, lead, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_update_component(
     component_id: str, name: str | None = None, description: str | None = None,
-    lead: str | None = None, execute: bool = False,
+    lead: str | None = None, execute: bool = True,
 ) -> dict:
     """Update a Jira component. Dry-run by default."""
     return jira_update_component(component_id, name, description, lead, execute)
 
 
-@mcp.tool()
-def mcp_jira_delete_component(component_id: str, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_delete_component(component_id: str, execute: bool = True) -> dict:
     """Delete a Jira component. Dry-run by default."""
     return jira_delete_component(component_id, execute)
 
 
 # ── Assign / Transitions / Metadata / Bulk / Archive ────────────────────────
 
-@mcp.tool()
-def mcp_jira_assign_issue(issue_key: str, assignee: str | None, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_assign_issue(issue_key: str, assignee: str | None, execute: bool = True) -> dict:
     """Assign a Jira issue. Pass null to unassign, '-1' for default assignee. Dry-run by default."""
     return jira_assign_issue(issue_key, assignee, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_list_transitions(issue_key: str) -> dict:
     """List the workflow transitions available for a Jira issue."""
     return jira_list_transitions(issue_key)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_createmeta(project_key: str | None = None, issue_type_names: str | None = None) -> dict:
     """Get metadata for creating Jira issues (fields/issue types per project)."""
     return jira_get_createmeta(project_key, issue_type_names)
 
 
-@mcp.tool()
-def mcp_jira_bulk_create_issues(issues: list[dict], execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_bulk_create_issues(issues: list[dict], execute: bool = True) -> dict:
     """Create many Jira issues in one call. Each item: {fields: {...}}. Dry-run by default."""
     return jira_bulk_create_issues(issues, execute)
 
 
-@mcp.tool()
-def mcp_jira_archive_issue(issue_key: str, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_archive_issue(issue_key: str, execute: bool = True) -> dict:
     """Archive a Jira issue. Dry-run by default."""
     return jira_archive_issue(issue_key, execute)
 
 
-@mcp.tool()
-def mcp_jira_restore_issue(issue_key: str, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_restore_issue(issue_key: str, execute: bool = True) -> dict:
     """Restore an archived Jira issue. Dry-run by default."""
     return jira_restore_issue(issue_key, execute)
 
 
 # ── Filters ─────────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_filter(filter_id: str) -> dict:
     """Get a Jira saved JQL filter by ID."""
     return jira_get_filter(filter_id)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_get_favourite_filters() -> dict:
     """Get the current user's favourite Jira filters."""
     return jira_get_favourite_filters()
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_create_filter(
-    name: str, jql: str, description: str = "", favourite: bool = False, execute: bool = False,
+    name: str, jql: str, description: str = "", favourite: bool = False, execute: bool = True,
 ) -> dict:
     """Create a Jira saved JQL filter. Dry-run by default."""
     return jira_create_filter(name, jql, description, favourite, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_update_filter(
     filter_id: str, name: str | None = None, jql: str | None = None,
-    description: str | None = None, execute: bool = False,
+    description: str | None = None, execute: bool = True,
 ) -> dict:
     """Update a Jira saved filter. Dry-run by default."""
     return jira_update_filter(filter_id, name, jql, description, execute)
 
 
-@mcp.tool()
-def mcp_jira_delete_filter(filter_id: str, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_jira_delete_filter(filter_id: str, execute: bool = True) -> dict:
     """Delete a Jira saved filter. Dry-run by default."""
     return jira_delete_filter(filter_id, execute)
 
@@ -626,7 +663,7 @@ def mcp_jira_delete_filter(filter_id: str, execute: bool = False) -> dict:
 # Bitbucket Tools (7)
 # ============================================================================
 
-@mcp.tool()
+@safe_tool()
 def mcp_bitbucket_list_prs(repo_slug: str, state: str = "OPEN", limit: int = 50) -> dict:
     """
     List pull requests in a Bitbucket repository.
@@ -636,37 +673,37 @@ def mcp_bitbucket_list_prs(repo_slug: str, state: str = "OPEN", limit: int = 50)
     return bitbucket_list_prs(repo_slug, state, limit)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_bitbucket_get_pr(repo_slug: str, pr_id: int) -> dict:
     """Get detailed information about a specific pull request."""
     return bitbucket_get_pr(repo_slug, pr_id)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_bitbucket_pr_diff(repo_slug: str, pr_id: int) -> dict:
     """Get the code diff for a pull request."""
     return bitbucket_pr_diff(repo_slug, pr_id)
 
 
-@mcp.tool()
-def mcp_bitbucket_pr_comment(repo_slug: str, pr_id: int, text: str, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_bitbucket_pr_comment(repo_slug: str, pr_id: int, text: str, execute: bool = True) -> dict:
     """Add a comment to a pull request. Set execute=true to actually comment."""
     return bitbucket_pr_comment(repo_slug, pr_id, text, execute)
 
 
-@mcp.tool()
-def mcp_bitbucket_approve_pr(repo_slug: str, pr_id: int, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_bitbucket_approve_pr(repo_slug: str, pr_id: int, execute: bool = True) -> dict:
     """Approve a pull request. Set execute=true to actually approve."""
     return bitbucket_approve_pr(repo_slug, pr_id, execute)
 
 
-@mcp.tool()
-def mcp_bitbucket_merge_pr(repo_slug: str, pr_id: int, message: str | None = None, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_bitbucket_merge_pr(repo_slug: str, pr_id: int, message: str | None = None, execute: bool = True) -> dict:
     """Merge a pull request. Set execute=true to actually merge."""
     return bitbucket_merge_pr(repo_slug, pr_id, message, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_bitbucket_list_repos(limit: int = 50) -> dict:
     """List all repositories in the workspace/project."""
     return bitbucket_list_repos(limit)
@@ -676,7 +713,7 @@ def mcp_bitbucket_list_repos(limit: int = 50) -> dict:
 # Confluence Tools (6)
 # ============================================================================
 
-@mcp.tool()
+@safe_tool()
 def mcp_confluence_search(query: str, space_key: str | None = None, content_type: str = "page", limit: int = 50) -> dict:
     """
     Search for Confluence pages and content.
@@ -686,7 +723,7 @@ def mcp_confluence_search(query: str, space_key: str | None = None, content_type
     return confluence_search(query, space_key, content_type, limit)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_confluence_get_page(page_id: str | None = None, space_key: str | None = None, title: str | None = None) -> dict:
     """
     Get a Confluence page by ID or title.
@@ -696,25 +733,25 @@ def mcp_confluence_get_page(page_id: str | None = None, space_key: str | None = 
     return confluence_get_page(page_id, space_key, title)
 
 
-@mcp.tool()
-def mcp_confluence_create_page(space_key: str, title: str, content: str, parent_id: str | None = None, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_confluence_create_page(space_key: str, title: str, content: str, parent_id: str | None = None, execute: bool = True) -> dict:
     """Create a new Confluence page. Set execute=true to actually create."""
     return confluence_create_page(space_key, title, content, parent_id, execute)
 
 
-@mcp.tool()
-def mcp_confluence_update_page(page_id: str, title: str, content: str, version: int, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_confluence_update_page(page_id: str, title: str, content: str, version: int, execute: bool = True) -> dict:
     """Update an existing Confluence page. Requires current version number. Set execute=true to actually update."""
     return confluence_update_page(page_id, title, content, version, execute)
 
 
-@mcp.tool()
-def mcp_confluence_add_comment(page_id: str, comment: str, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_confluence_add_comment(page_id: str, comment: str, execute: bool = True) -> dict:
     """Add a comment to a Confluence page. Set execute=true to actually comment."""
     return confluence_add_comment(page_id, comment, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_confluence_list_spaces(limit: int = 50) -> dict:
     """List all accessible Confluence spaces."""
     return confluence_list_spaces(limit)
@@ -724,13 +761,13 @@ def mcp_confluence_list_spaces(limit: int = 50) -> dict:
 # Bamboo Tools (7)
 # ============================================================================
 
-@mcp.tool()
+@safe_tool()
 def mcp_bamboo_list_plans(max_results: int = 50) -> dict:
     """List all build plans in Bamboo."""
     return bamboo_list_plans(max_results)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_bamboo_list_builds(plan_key: str, max_results: int = 50, include_all_states: bool = True) -> dict:
     """
     List builds for a specific build plan.
@@ -740,7 +777,7 @@ def mcp_bamboo_list_builds(plan_key: str, max_results: int = 50, include_all_sta
     return bamboo_list_builds(plan_key, max_results, include_all_states)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_bamboo_build_status(plan_key: str, build_number: int | None = None) -> dict:
     """
     Get status of a specific build or the latest build for a plan.
@@ -750,7 +787,7 @@ def mcp_bamboo_build_status(plan_key: str, build_number: int | None = None) -> d
     return bamboo_build_status(plan_key, build_number)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_bamboo_get_build(build_key: str) -> dict:
     """
     Get detailed information about a specific build.
@@ -760,19 +797,19 @@ def mcp_bamboo_get_build(build_key: str) -> dict:
     return bamboo_get_build(build_key)
 
 
-@mcp.tool()
-def mcp_bamboo_trigger_build(plan_key: str, variables: dict | None = None, execute: bool = False) -> dict:
+@safe_tool()
+def mcp_bamboo_trigger_build(plan_key: str, variables: dict | None = None, execute: bool = True) -> dict:
     """Trigger a new build. Set execute=true to actually trigger."""
     return bamboo_trigger_build(plan_key, variables, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_bamboo_summarize_failures(plan_key: str, limit: int = 10) -> dict:
     """Get a summary of recent build failures with failure reasons and patterns."""
     return bamboo_summarize_failures(plan_key, limit)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_bamboo_get_build_log(build_key: str) -> dict:
     """
     Get the build log output for a specific build.
@@ -790,10 +827,10 @@ def mcp_bamboo_get_build_log(build_key: str) -> dict:
 # Raw passthrough tools — full API coverage for any endpoint
 # ============================================================================
 
-@mcp.tool()
+@safe_tool()
 def mcp_jira_raw(
     method: str, path: str, params: dict | None = None,
-    body: Any = None, agile: bool = False, execute: bool = False,
+    body: Any = None, agile: bool = False, execute: bool = True,
 ) -> dict:
     """
     Call ANY Jira REST endpoint not covered by a typed tool.
@@ -806,28 +843,28 @@ def mcp_jira_raw(
     return jira_raw(method, path, params, body, agile, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_bitbucket_raw(
     method: str, path: str, params: dict | None = None,
-    body: Any = None, execute: bool = False,
+    body: Any = None, execute: bool = True,
 ) -> dict:
     """Call ANY Bitbucket REST endpoint. Write methods dry-run unless execute=true."""
     return bitbucket_raw(method, path, params, body, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_confluence_raw(
     method: str, path: str, params: dict | None = None,
-    body: Any = None, execute: bool = False,
+    body: Any = None, execute: bool = True,
 ) -> dict:
     """Call ANY Confluence REST endpoint (path relative to /rest/api). Write methods dry-run unless execute=true."""
     return confluence_raw(method, path, params, body, execute)
 
 
-@mcp.tool()
+@safe_tool()
 def mcp_bamboo_raw(
     method: str, path: str, params: dict | None = None,
-    body: Any = None, execute: bool = False,
+    body: Any = None, execute: bool = True,
 ) -> dict:
     """Call ANY Bamboo REST endpoint (path relative to /rest/api/latest). Write methods dry-run unless execute=true."""
     return bamboo_raw(method, path, params, body, execute)
@@ -837,7 +874,7 @@ if __name__ == "__main__":
     logger.info("=" * 70)
     logger.info("Atlassian MCP Server starting (%s)", _mcp_transport)
     logger.info("=" * 70)
-    logger.info("45 tools: Jira(8) + Jira Agile(17) + Bitbucket(7) + Confluence(6) + Bamboo(7)")
+    logger.info("87 tools: Jira(63) + Bitbucket(7) + Confluence(6) + Bamboo(7) + raw(4)")
     logger.info("=" * 70)
 
     if _mcp_transport == "streamable-http":

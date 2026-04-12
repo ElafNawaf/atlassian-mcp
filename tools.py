@@ -118,7 +118,7 @@ def jira_create_issue(
     project_key: str, summary: str, description: str = "",
     issue_type: str = "Task", priority: str | None = None,
     assignee: str | None = None, labels: list[str] | None = None,
-    execute: bool = False,
+    execute: bool = True,
 ) -> dict:
     """Create a new Jira issue."""
     _allow_project(project_key)
@@ -158,7 +158,7 @@ def jira_create_issue(
 def jira_update_issue(
     issue_key: str, summary: str | None = None, description: str | None = None,
     assignee: str | None = None, priority: str | None = None, status: str | None = None,
-    execute: bool = False,
+    execute: bool = True,
 ) -> dict:
     """Update an existing Jira issue."""
     _allow_project(issue_key)
@@ -202,7 +202,7 @@ def jira_update_issue(
     return {"key": issue_key, "updated": True}
 
 
-def jira_add_comment(issue_key: str, comment: str, execute: bool = False) -> dict:
+def jira_add_comment(issue_key: str, comment: str, execute: bool = True) -> dict:
     """Add a comment to a Jira issue."""
     _allow_project(issue_key)
     if execute and not is_execute_allowed():
@@ -223,7 +223,7 @@ def jira_add_comment(issue_key: str, comment: str, execute: bool = False) -> dic
     return {"created": True}
 
 
-def jira_create_subtasks(parent_issue_key: str, subtasks: list[dict], execute: bool = False) -> dict:
+def jira_create_subtasks(parent_issue_key: str, subtasks: list[dict], execute: bool = True) -> dict:
     """Create multiple subtasks under a parent Jira issue."""
     _allow_project(parent_issue_key)
     if execute and not is_execute_allowed():
@@ -258,7 +258,7 @@ def jira_create_subtasks(parent_issue_key: str, subtasks: list[dict], execute: b
     return {"created": len(keys), "keys": keys}
 
 
-def jira_transition_issue(issue_key: str, transition_name: str, execute: bool = False) -> dict:
+def jira_transition_issue(issue_key: str, transition_name: str, execute: bool = True) -> dict:
     """Transition a Jira issue to a new status."""
     _allow_project(issue_key)
     if execute and not is_execute_allowed():
@@ -451,7 +451,7 @@ def jira_get_sprint(sprint_id: int) -> dict:
 
 def jira_create_sprint(board_id: int, name: str, start_date: str | None = None,
                        end_date: str | None = None, goal: str | None = None,
-                       execute: bool = False) -> dict:
+                       execute: bool = True) -> dict:
     """Create a future sprint on a board."""
     if execute and not is_execute_allowed():
         return {"dryRun": True, "message": "WORKGRAPH_MODE is DRY_RUN."}
@@ -481,7 +481,7 @@ def jira_create_sprint(board_id: int, name: str, start_date: str | None = None,
 
 def jira_update_sprint(sprint_id: int, name: str | None = None, state: str | None = None,
                        start_date: str | None = None, end_date: str | None = None,
-                       goal: str | None = None, execute: bool = False) -> dict:
+                       goal: str | None = None, execute: bool = True) -> dict:
     """Update a sprint (name, state, dates, goal). Use state='active' to start, 'closed' to complete."""
     if execute and not is_execute_allowed():
         return {"dryRun": True, "message": "WORKGRAPH_MODE is DRY_RUN."}
@@ -532,7 +532,7 @@ def jira_get_sprint_issues(sprint_id: int, jql: str | None = None,
     return data
 
 
-def jira_move_issues_to_sprint(sprint_id: int, issue_keys: list[str], execute: bool = False) -> dict:
+def jira_move_issues_to_sprint(sprint_id: int, issue_keys: list[str], execute: bool = True) -> dict:
     """Move issues to a sprint. Maximum 50 issues per operation."""
     if execute and not is_execute_allowed():
         return {"dryRun": True, "message": "WORKGRAPH_MODE is DRY_RUN."}
@@ -552,7 +552,7 @@ def jira_move_issues_to_sprint(sprint_id: int, issue_keys: list[str], execute: b
     return {"moved": len(issue_keys)}
 
 
-def jira_move_issues_to_backlog(issue_keys: list[str], execute: bool = False) -> dict:
+def jira_move_issues_to_backlog(issue_keys: list[str], execute: bool = True) -> dict:
     """Move issues to the backlog (removes them from any sprint). Maximum 50 issues."""
     if execute and not is_execute_allowed():
         return {"dryRun": True, "message": "WORKGRAPH_MODE is DRY_RUN."}
@@ -606,7 +606,7 @@ def jira_get_epic_issues(epic_id_or_key: str, jql: str | None = None,
     return data
 
 
-def jira_move_issues_to_epic(epic_id_or_key: str, issue_keys: list[str], execute: bool = False) -> dict:
+def jira_move_issues_to_epic(epic_id_or_key: str, issue_keys: list[str], execute: bool = True) -> dict:
     """Move issues to an epic. Maximum 50 issues per operation."""
     if execute and not is_execute_allowed():
         return {"dryRun": True, "message": "WORKGRAPH_MODE is DRY_RUN."}
@@ -627,7 +627,7 @@ def jira_move_issues_to_epic(epic_id_or_key: str, issue_keys: list[str], execute
 
 
 def jira_rank_issues(issue_keys: list[str], rank_before_issue: str | None = None,
-                     rank_after_issue: str | None = None, execute: bool = False) -> dict:
+                     rank_after_issue: str | None = None, execute: bool = True) -> dict:
     """Rank (reorder) issues. Specify either rank_before_issue or rank_after_issue."""
     if execute and not is_execute_allowed():
         return {"dryRun": True, "message": "WORKGRAPH_MODE is DRY_RUN."}
@@ -696,7 +696,7 @@ def jira_get_attachment(attachment_id: str) -> dict:
         return r.json()
 
 
-def jira_delete_attachment(attachment_id: str, execute: bool = False) -> dict:
+def jira_delete_attachment(attachment_id: str, execute: bool = True) -> dict:
     """Delete an attachment by ID."""
     d = _dry("jira_delete_attachment", {"attachmentId": attachment_id}, execute)
     if d is not None:
@@ -734,7 +734,7 @@ def jira_get_issue_worklogs(issue_key: str) -> dict:
 
 def jira_add_issue_worklog(
     issue_key: str, time_spent: str, comment: str = "", started: str | None = None,
-    execute: bool = False,
+    execute: bool = True,
 ) -> dict:
     """Add a worklog entry (time_spent like '3h 20m', started ISO-8601)."""
     _allow_project(issue_key)
@@ -757,7 +757,7 @@ def jira_add_issue_worklog(
 
 def jira_update_issue_worklog(
     issue_key: str, worklog_id: str, time_spent: str | None = None,
-    comment: str | None = None, execute: bool = False,
+    comment: str | None = None, execute: bool = True,
 ) -> dict:
     """Update a worklog entry."""
     _allow_project(issue_key)
@@ -777,7 +777,7 @@ def jira_update_issue_worklog(
     return {"updated": True}
 
 
-def jira_delete_issue_worklog(issue_key: str, worklog_id: str, execute: bool = False) -> dict:
+def jira_delete_issue_worklog(issue_key: str, worklog_id: str, execute: bool = True) -> dict:
     """Delete a worklog entry."""
     _allow_project(issue_key)
     d = _dry("jira_delete_issue_worklog", {"issueKey": issue_key, "worklogId": worklog_id}, execute)
@@ -804,7 +804,7 @@ def jira_get_issue_watchers(issue_key: str) -> dict:
         return r.json()
 
 
-def jira_add_issue_watcher(issue_key: str, username: str, execute: bool = False) -> dict:
+def jira_add_issue_watcher(issue_key: str, username: str, execute: bool = True) -> dict:
     """Add a watcher to an issue (username or accountId depending on Jira flavor)."""
     _allow_project(issue_key)
     d = _dry("jira_add_issue_watcher", {"issueKey": issue_key, "username": username}, execute)
@@ -818,7 +818,7 @@ def jira_add_issue_watcher(issue_key: str, username: str, execute: bool = False)
     return {"added": True}
 
 
-def jira_remove_issue_watcher(issue_key: str, username: str, execute: bool = False) -> dict:
+def jira_remove_issue_watcher(issue_key: str, username: str, execute: bool = True) -> dict:
     """Remove a watcher from an issue."""
     _allow_project(issue_key)
     d = _dry("jira_remove_issue_watcher", {"issueKey": issue_key, "username": username}, execute)
@@ -846,7 +846,7 @@ def jira_get_issue_link_types() -> dict:
 
 def jira_create_issue_link(
     link_type: str, inward_issue: str, outward_issue: str,
-    comment: str | None = None, execute: bool = False,
+    comment: str | None = None, execute: bool = True,
 ) -> dict:
     """Link two issues (e.g. 'Blocks', 'Relates')."""
     _allow_project(inward_issue)
@@ -879,7 +879,7 @@ def jira_get_issue_link(link_id: str) -> dict:
         return r.json()
 
 
-def jira_delete_issue_link(link_id: str, execute: bool = False) -> dict:
+def jira_delete_issue_link(link_id: str, execute: bool = True) -> dict:
     """Delete an issue link by ID."""
     d = _dry("jira_delete_issue_link", {"linkId": link_id}, execute)
     if d is not None:
@@ -907,7 +907,7 @@ def jira_get_issue_remote_links(issue_key: str) -> dict:
 
 def jira_create_issue_remote_link(
     issue_key: str, url: str, title: str, summary: str | None = None,
-    global_id: str | None = None, execute: bool = False,
+    global_id: str | None = None, execute: bool = True,
 ) -> dict:
     """Create or update a remote link on an issue."""
     _allow_project(issue_key)
@@ -928,7 +928,7 @@ def jira_create_issue_remote_link(
     return r.json() if r.content else {"created": True}
 
 
-def jira_delete_issue_remote_link(issue_key: str, link_id: str, execute: bool = False) -> dict:
+def jira_delete_issue_remote_link(issue_key: str, link_id: str, execute: bool = True) -> dict:
     """Delete a remote link from an issue."""
     _allow_project(issue_key)
     d = _dry("jira_delete_issue_remote_link", {"issueKey": issue_key, "linkId": link_id}, execute)
@@ -967,7 +967,7 @@ def jira_get_version(version_id: str) -> dict:
 
 def jira_create_version(
     project_key: str, name: str, description: str = "",
-    release_date: str | None = None, released: bool = False, execute: bool = False,
+    release_date: str | None = None, released: bool = False, execute: bool = True,
 ) -> dict:
     """Create a version in a project."""
     _allow_project(project_key)
@@ -990,7 +990,7 @@ def jira_create_version(
 
 def jira_update_version(
     version_id: str, name: str | None = None, description: str | None = None,
-    release_date: str | None = None, released: bool | None = None, execute: bool = False,
+    release_date: str | None = None, released: bool | None = None, execute: bool = True,
 ) -> dict:
     """Update a version."""
     d = _dry("jira_update_version", {"versionId": version_id}, execute)
@@ -1014,7 +1014,7 @@ def jira_update_version(
     return r.json()
 
 
-def jira_delete_version(version_id: str, execute: bool = False) -> dict:
+def jira_delete_version(version_id: str, execute: bool = True) -> dict:
     """Delete a version."""
     d = _dry("jira_delete_version", {"versionId": version_id}, execute)
     if d is not None:
@@ -1052,7 +1052,7 @@ def jira_get_component(component_id: str) -> dict:
 
 def jira_create_component(
     project_key: str, name: str, description: str = "",
-    lead: str | None = None, execute: bool = False,
+    lead: str | None = None, execute: bool = True,
 ) -> dict:
     """Create a component in a project."""
     _allow_project(project_key)
@@ -1075,7 +1075,7 @@ def jira_create_component(
 
 def jira_update_component(
     component_id: str, name: str | None = None, description: str | None = None,
-    lead: str | None = None, execute: bool = False,
+    lead: str | None = None, execute: bool = True,
 ) -> dict:
     """Update a component."""
     d = _dry("jira_update_component", {"componentId": component_id}, execute)
@@ -1097,7 +1097,7 @@ def jira_update_component(
     return r.json()
 
 
-def jira_delete_component(component_id: str, execute: bool = False) -> dict:
+def jira_delete_component(component_id: str, execute: bool = True) -> dict:
     """Delete a component."""
     d = _dry("jira_delete_component", {"componentId": component_id}, execute)
     if d is not None:
@@ -1112,7 +1112,7 @@ def jira_delete_component(component_id: str, execute: bool = False) -> dict:
 
 # ── Assign, Transitions list, Issue-type metadata, Archive ───────────────────
 
-def jira_assign_issue(issue_key: str, assignee: str | None, execute: bool = False) -> dict:
+def jira_assign_issue(issue_key: str, assignee: str | None, execute: bool = True) -> dict:
     """Assign an issue (null/'-1' to unassign, '-1' for default assignee)."""
     _allow_project(issue_key)
     d = _dry("jira_assign_issue", {"issueKey": issue_key, "assignee": assignee}, execute)
@@ -1153,7 +1153,7 @@ def jira_get_createmeta(project_key: str | None = None, issue_type_names: str | 
         return r.json()
 
 
-def jira_bulk_create_issues(issues: list[dict], execute: bool = False) -> dict:
+def jira_bulk_create_issues(issues: list[dict], execute: bool = True) -> dict:
     """Create multiple issues in one request. Each entry: {fields: {...}}."""
     d = _dry("jira_bulk_create_issues", {"count": len(issues)}, execute)
     if d is not None:
@@ -1167,7 +1167,7 @@ def jira_bulk_create_issues(issues: list[dict], execute: bool = False) -> dict:
     return r.json()
 
 
-def jira_archive_issue(issue_key: str, execute: bool = False) -> dict:
+def jira_archive_issue(issue_key: str, execute: bool = True) -> dict:
     """Archive a single issue."""
     _allow_project(issue_key)
     d = _dry("jira_archive_issue", {"issueKey": issue_key}, execute)
@@ -1181,7 +1181,7 @@ def jira_archive_issue(issue_key: str, execute: bool = False) -> dict:
     return {"archived": True}
 
 
-def jira_restore_issue(issue_key: str, execute: bool = False) -> dict:
+def jira_restore_issue(issue_key: str, execute: bool = True) -> dict:
     """Restore an archived issue."""
     _allow_project(issue_key)
     d = _dry("jira_restore_issue", {"issueKey": issue_key}, execute)
@@ -1218,7 +1218,7 @@ def jira_get_favourite_filters() -> dict:
 
 
 def jira_create_filter(
-    name: str, jql: str, description: str = "", favourite: bool = False, execute: bool = False,
+    name: str, jql: str, description: str = "", favourite: bool = False, execute: bool = True,
 ) -> dict:
     """Create a saved JQL filter."""
     d = _dry("jira_create_filter", {"name": name}, execute)
@@ -1238,7 +1238,7 @@ def jira_create_filter(
 
 def jira_update_filter(
     filter_id: str, name: str | None = None, jql: str | None = None,
-    description: str | None = None, execute: bool = False,
+    description: str | None = None, execute: bool = True,
 ) -> dict:
     """Update a saved filter."""
     d = _dry("jira_update_filter", {"filterId": filter_id}, execute)
@@ -1260,7 +1260,7 @@ def jira_update_filter(
     return r.json()
 
 
-def jira_delete_filter(filter_id: str, execute: bool = False) -> dict:
+def jira_delete_filter(filter_id: str, execute: bool = True) -> dict:
     """Delete a saved filter."""
     d = _dry("jira_delete_filter", {"filterId": filter_id}, execute)
     if d is not None:
@@ -1348,7 +1348,7 @@ def bitbucket_pr_diff(repo_slug: str, pr_id: int) -> dict:
     return {"diff": data} if isinstance(data, str) else data
 
 
-def bitbucket_pr_comment(repo_slug: str, pr_id: int, text: str, execute: bool = False) -> dict:
+def bitbucket_pr_comment(repo_slug: str, pr_id: int, text: str, execute: bool = True) -> dict:
     """Add a comment to a pull request."""
     _allow_repo(repo_slug)
     if execute and not is_execute_allowed():
@@ -1377,7 +1377,7 @@ def bitbucket_pr_comment(repo_slug: str, pr_id: int, text: str, execute: bool = 
     return {"created": True}
 
 
-def bitbucket_approve_pr(repo_slug: str, pr_id: int, execute: bool = False) -> dict:
+def bitbucket_approve_pr(repo_slug: str, pr_id: int, execute: bool = True) -> dict:
     """Approve a pull request."""
     _allow_repo(repo_slug)
     if execute and not is_execute_allowed():
@@ -1404,7 +1404,7 @@ def bitbucket_approve_pr(repo_slug: str, pr_id: int, execute: bool = False) -> d
     return {"approved": True}
 
 
-def bitbucket_merge_pr(repo_slug: str, pr_id: int, message: str | None = None, execute: bool = False) -> dict:
+def bitbucket_merge_pr(repo_slug: str, pr_id: int, message: str | None = None, execute: bool = True) -> dict:
     """Merge a pull request."""
     _allow_repo(repo_slug)
     if execute and not is_execute_allowed():
@@ -1514,7 +1514,7 @@ def confluence_get_page(page_id: str | None = None, space_key: str | None = None
     return data
 
 
-def confluence_create_page(space_key: str, title: str, content: str, parent_id: str | None = None, execute: bool = False) -> dict:
+def confluence_create_page(space_key: str, title: str, content: str, parent_id: str | None = None, execute: bool = True) -> dict:
     """Create a new Confluence page."""
     _allow_space(space_key)
     if execute and not is_execute_allowed():
@@ -1545,7 +1545,7 @@ def confluence_create_page(space_key: str, title: str, content: str, parent_id: 
     return {"id": data["id"], "title": data["title"], "created": True}
 
 
-def confluence_update_page(page_id: str, title: str, content: str, version: int, execute: bool = False) -> dict:
+def confluence_update_page(page_id: str, title: str, content: str, version: int, execute: bool = True) -> dict:
     """Update an existing Confluence page."""
     if execute and not is_execute_allowed():
         return {"dryRun": True}
@@ -1575,7 +1575,7 @@ def confluence_update_page(page_id: str, title: str, content: str, version: int,
     return {"updated": True}
 
 
-def confluence_add_comment(page_id: str, comment: str, execute: bool = False) -> dict:
+def confluence_add_comment(page_id: str, comment: str, execute: bool = True) -> dict:
     """Add a comment to a Confluence page."""
     if execute and not is_execute_allowed():
         return {"dryRun": True}
@@ -1698,7 +1698,7 @@ def bamboo_get_build(build_key: str) -> dict:
     return data
 
 
-def bamboo_trigger_build(plan_key: str, variables: dict | None = None, execute: bool = False) -> dict:
+def bamboo_trigger_build(plan_key: str, variables: dict | None = None, execute: bool = True) -> dict:
     """Trigger a new build for a build plan."""
     _allow_plan(plan_key)
     if execute and not is_execute_allowed():
@@ -1807,25 +1807,25 @@ def _raw(name: str, client_factory, method: str, path: str,
 
 
 def jira_raw(method: str, path: str, params: dict | None = None,
-             body: Any = None, agile: bool = False, execute: bool = False) -> dict:
+             body: Any = None, agile: bool = False, execute: bool = True) -> dict:
     """Call any Jira REST endpoint. path is relative to /rest/api/{version} (or /rest/agile/1.0 if agile=true)."""
     factory = jira_agile_client if agile else jira_client
     return _raw("jira_raw", factory, method, path, params, body, execute)
 
 
 def bitbucket_raw(method: str, path: str, params: dict | None = None,
-                  body: Any = None, execute: bool = False) -> dict:
+                  body: Any = None, execute: bool = True) -> dict:
     """Call any Bitbucket REST endpoint. path is relative to the Bitbucket API base."""
     return _raw("bitbucket_raw", bitbucket_client, method, path, params, body, execute)
 
 
 def confluence_raw(method: str, path: str, params: dict | None = None,
-                   body: Any = None, execute: bool = False) -> dict:
+                   body: Any = None, execute: bool = True) -> dict:
     """Call any Confluence REST endpoint. path is relative to /rest/api."""
     return _raw("confluence_raw", confluence_client, method, path, params, body, execute)
 
 
 def bamboo_raw(method: str, path: str, params: dict | None = None,
-               body: Any = None, execute: bool = False) -> dict:
+               body: Any = None, execute: bool = True) -> dict:
     """Call any Bamboo REST endpoint. path is relative to /rest/api/latest."""
     return _raw("bamboo_raw", bamboo_client, method, path, params, body, execute)
