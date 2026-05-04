@@ -15,7 +15,8 @@ from config import (
     BITBUCKET_WORKSPACE,
 )
 from clients import (
-    jira_client, jira_agile_client, bitbucket_client, confluence_client, bamboo_client,
+    jira_client, jira_agile_client, jira_dashboards_client,
+    bitbucket_client, confluence_client, bamboo_client,
     is_bitbucket_server,
 )
 from audit import audit_log
@@ -1761,6 +1762,374 @@ def bamboo_get_build_log(build_key: str) -> dict:
         log_text = r.text
     audit_log("bamboo_get_build_log", {"build_key": build_key}, "success")
     return {"buildKey": build_key, "log": log_text}
+
+
+# ── Dashboards ───────────────────────────────────────────────────────────────
+
+def jira_list_dashboards(filter: str | None = None, max_results: int = 20, start_at: int = 0) -> dict:
+    """List Jira dashboards. filter='favourite' returns favourites only."""
+    if MOCK_MODE:
+        return {"dashboards": [], "total": 0}
+    params: dict[str, Any] = {"maxResults": max_results, "startAt": start_at}
+    if filter:
+        params["filter"] = filter
+    with _require_jira() as c:
+        r = c.get("/dashboard", params=params)
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_get_dashboard(dashboard_id: str) -> dict:
+    """Get a single Jira dashboard by ID."""
+    if MOCK_MODE:
+        return {"id": dashboard_id}
+    with _require_jira() as c:
+        r = c.get(f"/dashboard/{dashboard_id}")
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_list_dashboard_item_properties(dashboard_id: str, item_id: str) -> dict:
+    """List all property keys for a dashboard item (gadget)."""
+    if MOCK_MODE:
+        return {"keys": []}
+    with _require_jira() as c:
+        r = c.get(f"/dashboard/{dashboard_id}/items/{item_id}/properties")
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_get_dashboard_item_property(dashboard_id: str, item_id: str, property_key: str) -> dict:
+    """Get a single property value for a dashboard item."""
+    if MOCK_MODE:
+        return {"key": property_key}
+    with _require_jira() as c:
+        r = c.get(f"/dashboard/{dashboard_id}/items/{item_id}/properties/{property_key}")
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_set_dashboard_item_property(
+    dashboard_id: str, item_id: str, property_key: str, value: Any, execute: bool = True,
+) -> dict:
+    """Set a property on a dashboard item. value can be any JSON-serializable type."""
+    d = _dry("jira_set_dashboard_item_property",
+             {"dashboardId": dashboard_id, "itemId": item_id, "propertyKey": property_key}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"set": True}
+    with _require_jira() as c:
+        c.put(f"/dashboard/{dashboard_id}/items/{item_id}/properties/{property_key}", json=value).raise_for_status()
+    audit_log("jira_set_dashboard_item_property",
+              {"dashboardId": dashboard_id, "itemId": item_id, "propertyKey": property_key}, "success")
+    return {"set": True}
+
+
+def jira_delete_dashboard_item_property(
+    dashboard_id: str, item_id: str, property_key: str, execute: bool = True,
+) -> dict:
+    """Delete a property from a dashboard item."""
+    d = _dry("jira_delete_dashboard_item_property",
+             {"dashboardId": dashboard_id, "itemId": item_id, "propertyKey": property_key}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"deleted": True}
+    with _require_jira() as c:
+        c.delete(f"/dashboard/{dashboard_id}/items/{item_id}/properties/{property_key}").raise_for_status()
+    audit_log("jira_delete_dashboard_item_property",
+              {"dashboardId": dashboard_id, "itemId": item_id, "propertyKey": property_key}, "success")
+    return {"deleted": True}
+
+
+# ── Dashboards plugin API (internal /rest/dashboards/1.0/) ──────────────────
+# These let you actually CREATE/MODIFY dashboards and add gadgets — the public
+# /rest/api/2/dashboard endpoints only support read.
+
+def _require_jira_dashboards() -> Any:
+    c = jira_dashboards_client()
+    if not c:
+        raise ValueError("Jira not configured.")
+    return c
+
+
+def jira_create_dashboard(
+    name: str, description: str = "",
+    layout: str = "AA",
+    share_permissions: list[dict] | None = None,
+    edit_permissions: list[dict] | None = None,
+    execute: bool = True,
+) -> dict:
+    """Create a new Jira dashboard.
+
+    layout: column code — 'A' (1 col), 'AA' (2 equal), 'AB' (2: 60/40),
+            'AAA' (3 equal), 'ABA' (3: 25/50/25), 'AABC' (4 cols).
+    share_permissions / edit_permissions: list of dicts like
+            [{'type': 'global'}], [{'type': 'authenticated'}],
+            [{'type': 'user', 'param': 'username'}],
+            [{'type': 'project', 'param': 'projectId'}].
+    Defaults to private (only the creator can see/edit).
+    """
+    d = _dry("jira_create_dashboard", {"name": name}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"id": "9999", "name": name, "created": True}
+    payload: dict[str, Any] = {
+        "name": name,
+        "description": description,
+        "layout": layout,
+        "sharePermissions": share_permissions or [],
+        "editPermissions": edit_permissions or [],
+    }
+    with _require_jira_dashboards() as c:
+        r = c.post("/", json=payload)
+        r.raise_for_status()
+    audit_log("jira_create_dashboard", {"name": name}, "success")
+    return r.json()
+
+
+def jira_update_dashboard(
+    dashboard_id: str, name: str | None = None, description: str | None = None,
+    layout: str | None = None,
+    share_permissions: list[dict] | None = None,
+    edit_permissions: list[dict] | None = None,
+    execute: bool = True,
+) -> dict:
+    """Update a dashboard's name/description/layout/permissions."""
+    d = _dry("jira_update_dashboard", {"dashboardId": dashboard_id}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"id": dashboard_id, "updated": True}
+    payload: dict[str, Any] = {}
+    if name is not None:
+        payload["name"] = name
+    if description is not None:
+        payload["description"] = description
+    if layout is not None:
+        payload["layout"] = layout
+    if share_permissions is not None:
+        payload["sharePermissions"] = share_permissions
+    if edit_permissions is not None:
+        payload["editPermissions"] = edit_permissions
+    with _require_jira_dashboards() as c:
+        r = c.put(f"/{dashboard_id}", json=payload)
+        r.raise_for_status()
+    audit_log("jira_update_dashboard", {"dashboardId": dashboard_id}, "success")
+    return r.json() if r.content else {"updated": True}
+
+
+def jira_delete_dashboard(dashboard_id: str, execute: bool = True) -> dict:
+    """Delete a Jira dashboard by ID."""
+    d = _dry("jira_delete_dashboard", {"dashboardId": dashboard_id}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"deleted": True}
+    with _require_jira_dashboards() as c:
+        c.delete(f"/{dashboard_id}").raise_for_status()
+    audit_log("jira_delete_dashboard", {"dashboardId": dashboard_id}, "success")
+    return {"deleted": True}
+
+
+def jira_list_available_gadgets() -> dict:
+    """List all gadgets available to add to a dashboard.
+
+    Each entry has a 'uri' (gadget XML spec) and a 'title'. Pass the uri
+    to jira_add_dashboard_gadget. Common gadget URIs include:
+      - rest/gadgets/1.0/g/com.atlassian.jira.gadgets:filter-results-gadget/gadgets/filter-results-gadget.xml
+      - rest/gadgets/1.0/g/com.atlassian.jira.gadgets:pie-chart-gadget/gadgets/pie-chart-gadget.xml
+      - rest/gadgets/1.0/g/com.atlassian.jira.gadgets:two-dimensional-stats-gadget/gadgets/two-dimensional-stats-gadget.xml
+      - rest/gadgets/1.0/g/com.atlassian.jira.gadgets:created-vs-resolved-chart-gadget/gadgets/created-vs-resolved-chart-gadget.xml
+      - rest/gadgets/1.0/g/com.atlassian.jira.gadgets:assigned-to-me-gadget/gadgets/assigned-to-me-gadget.xml
+      - rest/gadgets/1.0/g/com.atlassian.jira.gadgets:sprint-burndown-gadget/gadgets/sprint-burndown-gadget.xml
+    """
+    if MOCK_MODE:
+        return {"gadgets": []}
+    with _require_jira_dashboards() as c:
+        r = c.get("/gadgets")
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_add_dashboard_gadget(
+    dashboard_id: str, uri: str, color: str = "blue",
+    column: int | None = None, row: int | None = None, execute: bool = True,
+) -> dict:
+    """Add a gadget (chart) to a dashboard. uri comes from jira_list_available_gadgets."""
+    d = _dry("jira_add_dashboard_gadget", {"dashboardId": dashboard_id, "uri": uri}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"id": "g-1", "added": True}
+    payload: dict[str, Any] = {"uri": uri, "color": color}
+    if column is not None:
+        payload["column"] = column
+    if row is not None:
+        payload["row"] = row
+    with _require_jira_dashboards() as c:
+        r = c.post(f"/{dashboard_id}/gadget", json=payload)
+        r.raise_for_status()
+    audit_log("jira_add_dashboard_gadget", {"dashboardId": dashboard_id, "uri": uri}, "success")
+    return r.json()
+
+
+def jira_list_dashboard_gadgets(dashboard_id: str) -> dict:
+    """List gadgets currently on a dashboard."""
+    if MOCK_MODE:
+        return {"gadgets": []}
+    with _require_jira_dashboards() as c:
+        r = c.get(f"/{dashboard_id}/gadget")
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_move_dashboard_gadget(
+    dashboard_id: str, gadget_id: str,
+    column: int | None = None, row: int | None = None, color: str | None = None,
+    execute: bool = True,
+) -> dict:
+    """Move a gadget to a new column/row on a dashboard, or change its color."""
+    d = _dry("jira_move_dashboard_gadget",
+             {"dashboardId": dashboard_id, "gadgetId": gadget_id}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"moved": True}
+    payload: dict[str, Any] = {}
+    if column is not None:
+        payload["column"] = column
+    if row is not None:
+        payload["row"] = row
+    if color is not None:
+        payload["color"] = color
+    with _require_jira_dashboards() as c:
+        r = c.put(f"/{dashboard_id}/gadget/{gadget_id}", json=payload)
+        r.raise_for_status()
+    audit_log("jira_move_dashboard_gadget",
+              {"dashboardId": dashboard_id, "gadgetId": gadget_id}, "success")
+    return r.json() if r.content else {"moved": True}
+
+
+def jira_remove_dashboard_gadget(dashboard_id: str, gadget_id: str, execute: bool = True) -> dict:
+    """Remove a gadget from a dashboard."""
+    d = _dry("jira_remove_dashboard_gadget",
+             {"dashboardId": dashboard_id, "gadgetId": gadget_id}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"removed": True}
+    with _require_jira_dashboards() as c:
+        c.delete(f"/{dashboard_id}/gadget/{gadget_id}").raise_for_status()
+    audit_log("jira_remove_dashboard_gadget",
+              {"dashboardId": dashboard_id, "gadgetId": gadget_id}, "success")
+    return {"removed": True}
+
+
+def jira_get_myself() -> dict:
+    """Get the currently authenticated user (key/name/accountId for share/edit perms)."""
+    if MOCK_MODE:
+        return {"name": "mock"}
+    with _require_jira() as c:
+        r = c.get("/myself")
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_search_users(query: str, max_results: int = 20) -> dict:
+    """Search Jira users by username/email/display name. Useful for share/edit perms and assignee."""
+    if MOCK_MODE:
+        return {"users": []}
+    with _require_jira() as c:
+        r = c.get("/user/search", params={"username": query, "maxResults": max_results})
+        r.raise_for_status()
+        return {"users": r.json()}
+
+
+def jira_list_groups(query: str = "", max_results: int = 50) -> dict:
+    """List Jira groups (group picker). Useful for group-scoped dashboard share permissions."""
+    if MOCK_MODE:
+        return {"groups": {"items": []}}
+    with _require_jira() as c:
+        r = c.get("/groups/picker", params={"query": query, "maxResults": max_results})
+        r.raise_for_status()
+        return r.json()
+
+
+def jira_list_projects() -> dict:
+    """List all Jira projects visible to the current user."""
+    if MOCK_MODE:
+        return {"projects": []}
+    with _require_jira() as c:
+        r = c.get("/project")
+        r.raise_for_status()
+        return {"projects": r.json()}
+
+
+def jira_list_statuses() -> dict:
+    """List all global issue statuses (id, name, category) — useful for chart configuration."""
+    if MOCK_MODE:
+        return {"statuses": []}
+    with _require_jira() as c:
+        r = c.get("/status")
+        r.raise_for_status()
+        return {"statuses": r.json()}
+
+
+def jira_list_priorities() -> dict:
+    """List all issue priorities — useful for priority breakdown gadgets."""
+    if MOCK_MODE:
+        return {"priorities": []}
+    with _require_jira() as c:
+        r = c.get("/priority")
+        r.raise_for_status()
+        return {"priorities": r.json()}
+
+
+def jira_list_issue_types() -> dict:
+    """List all issue types — useful for issue-type breakdown gadgets."""
+    if MOCK_MODE:
+        return {"issueTypes": []}
+    with _require_jira() as c:
+        r = c.get("/issuetype")
+        r.raise_for_status()
+        return {"issueTypes": r.json()}
+
+
+def jira_list_fields() -> dict:
+    """List all Jira fields (system + custom). Returns id, name, custom flag — needed to set 'statType' on stats gadgets and pick custom fields."""
+    if MOCK_MODE:
+        return {"fields": []}
+    with _require_jira() as c:
+        r = c.get("/field")
+        r.raise_for_status()
+        return {"fields": r.json()}
+
+
+def jira_set_dashboard_gadget_prefs(
+    dashboard_id: str, gadget_id: str, prefs: dict, execute: bool = True,
+) -> dict:
+    """Configure a gadget's preferences (e.g. JQL filter, project, chart type).
+
+    prefs is a flat dict like {'filterId': '10001', 'numberToShow': '10'}.
+    Each gadget XML defines its own pref keys; inspect via the UI's
+    'Edit' panel or the gadget XML at the URI.
+    """
+    d = _dry("jira_set_dashboard_gadget_prefs",
+             {"dashboardId": dashboard_id, "gadgetId": gadget_id}, execute)
+    if d is not None:
+        return d
+    if MOCK_MODE:
+        return {"set": True}
+    payload = {"prefs": [{"key": k, "value": str(v)} for k, v in prefs.items()]}
+    with _require_jira_dashboards() as c:
+        r = c.put(f"/{dashboard_id}/gadget/{gadget_id}/prefs", json=payload)
+        r.raise_for_status()
+    audit_log("jira_set_dashboard_gadget_prefs",
+              {"dashboardId": dashboard_id, "gadgetId": gadget_id}, "success")
+    return r.json() if r.content else {"set": True}
 
 
 # ============================================================================

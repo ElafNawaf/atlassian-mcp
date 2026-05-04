@@ -54,6 +54,26 @@ def jira_client() -> httpx.Client | None:
     )
 
 
+def jira_dashboards_client() -> httpx.Client | None:
+    """Client for Jira's internal Dashboards plugin API (/rest/dashboards/1.0/).
+
+    Used by the Jira UI for dashboard CRUD and gadget management. Not part of
+    the public REST API but stable across DC versions.
+    """
+    if not (JIRA_BASE_URL and JIRA_EMAIL and JIRA_TOKEN):
+        logger.debug("Jira not configured")
+        return None
+
+    extra, auth = _auth_for(JIRA_BASE_URL, JIRA_EMAIL, JIRA_TOKEN)
+    return httpx.Client(
+        base_url=f"{JIRA_BASE_URL}/rest/dashboards/1.0",
+        auth=auth,
+        headers={**_COMMON_HEADERS, **extra},
+        timeout=30.0,
+        verify=False,
+    )
+
+
 def jira_agile_client() -> httpx.Client | None:
     """Client for the Jira Software Agile REST API (/rest/agile/1.0/)."""
     if not (JIRA_BASE_URL and JIRA_EMAIL and JIRA_TOKEN):

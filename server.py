@@ -82,6 +82,32 @@ from tools import (
     jira_create_filter,
     jira_update_filter,
     jira_delete_filter,
+    # Jira Dashboards
+    jira_list_dashboards,
+    jira_get_dashboard,
+    jira_list_dashboard_item_properties,
+    jira_get_dashboard_item_property,
+    jira_set_dashboard_item_property,
+    jira_delete_dashboard_item_property,
+    # Jira Dashboards plugin (create/edit dashboards & gadgets)
+    jira_create_dashboard,
+    jira_update_dashboard,
+    jira_delete_dashboard,
+    jira_list_available_gadgets,
+    jira_list_dashboard_gadgets,
+    jira_add_dashboard_gadget,
+    jira_move_dashboard_gadget,
+    jira_remove_dashboard_gadget,
+    jira_set_dashboard_gadget_prefs,
+    # Jira lookup helpers (for dashboard/gadget configuration)
+    jira_get_myself,
+    jira_search_users,
+    jira_list_groups,
+    jira_list_projects,
+    jira_list_statuses,
+    jira_list_priorities,
+    jira_list_issue_types,
+    jira_list_fields,
     # Bitbucket
     bitbucket_list_prs,
     bitbucket_get_pr,
@@ -657,6 +683,206 @@ def mcp_jira_update_filter(
 def mcp_jira_delete_filter(filter_id: str, execute: bool = True) -> dict:
     """Delete a Jira saved filter. Dry-run by default."""
     return jira_delete_filter(filter_id, execute)
+
+
+# ── Dashboards ──────────────────────────────────────────────────────────────
+
+@safe_tool()
+def mcp_jira_list_dashboards(filter: str | None = None, max_results: int = 20, start_at: int = 0) -> dict:
+    """List Jira dashboards. filter='favourite' returns the user's favourites only."""
+    return jira_list_dashboards(filter, max_results, start_at)
+
+
+@safe_tool()
+def mcp_jira_get_dashboard(dashboard_id: str) -> dict:
+    """Get a single Jira dashboard by ID."""
+    return jira_get_dashboard(dashboard_id)
+
+
+@safe_tool()
+def mcp_jira_list_dashboard_item_properties(dashboard_id: str, item_id: str) -> dict:
+    """List all property keys for a dashboard item (gadget)."""
+    return jira_list_dashboard_item_properties(dashboard_id, item_id)
+
+
+@safe_tool()
+def mcp_jira_get_dashboard_item_property(dashboard_id: str, item_id: str, property_key: str) -> dict:
+    """Get a single property value for a dashboard item (gadget)."""
+    return jira_get_dashboard_item_property(dashboard_id, item_id, property_key)
+
+
+@safe_tool()
+def mcp_jira_set_dashboard_item_property(
+    dashboard_id: str, item_id: str, property_key: str, value: Any, execute: bool = True,
+) -> dict:
+    """Set a property on a dashboard item (gadget). value can be any JSON value."""
+    return jira_set_dashboard_item_property(dashboard_id, item_id, property_key, value, execute)
+
+
+@safe_tool()
+def mcp_jira_delete_dashboard_item_property(
+    dashboard_id: str, item_id: str, property_key: str, execute: bool = True,
+) -> dict:
+    """Delete a property from a dashboard item (gadget)."""
+    return jira_delete_dashboard_item_property(dashboard_id, item_id, property_key, execute)
+
+
+# ── Dashboards plugin (create/edit dashboards & gadgets) ────────────────────
+
+@safe_tool()
+def mcp_jira_create_dashboard(
+    name: str, description: str = "", layout: str = "AA",
+    share_permissions: list[dict] | None = None,
+    edit_permissions: list[dict] | None = None,
+    execute: bool = True,
+) -> dict:
+    """
+    Create a new Jira dashboard via the internal Dashboards plugin.
+
+    layout: 'A' (1 col), 'AA' (2 equal), 'AB' (2: 60/40), 'AAA' (3 equal),
+            'ABA' (3: 25/50/25), 'AABC' (4 cols).
+    share/edit_permissions: list of {type, [param]} dicts. Examples:
+      [{'type': 'global'}]                     -> public
+      [{'type': 'authenticated'}]              -> any logged-in user
+      [{'type': 'user', 'param': 'username'}]  -> single user
+      [{'type': 'group', 'param': 'group'}]    -> a group
+      [{'type': 'project', 'param': '10000'}]  -> a project
+    Defaults to private (creator only).
+    """
+    return jira_create_dashboard(name, description, layout, share_permissions, edit_permissions, execute)
+
+
+@safe_tool()
+def mcp_jira_update_dashboard(
+    dashboard_id: str, name: str | None = None, description: str | None = None,
+    layout: str | None = None,
+    share_permissions: list[dict] | None = None,
+    edit_permissions: list[dict] | None = None,
+    execute: bool = True,
+) -> dict:
+    """Update an existing dashboard's name, description, layout, or sharing."""
+    return jira_update_dashboard(dashboard_id, name, description, layout, share_permissions, edit_permissions, execute)
+
+
+@safe_tool()
+def mcp_jira_delete_dashboard(dashboard_id: str, execute: bool = True) -> dict:
+    """Delete a Jira dashboard by ID."""
+    return jira_delete_dashboard(dashboard_id, execute)
+
+
+@safe_tool()
+def mcp_jira_list_available_gadgets() -> dict:
+    """List all gadgets available to add to a dashboard (returns each gadget's URI + title)."""
+    return jira_list_available_gadgets()
+
+
+@safe_tool()
+def mcp_jira_list_dashboard_gadgets(dashboard_id: str) -> dict:
+    """List the gadgets currently on a dashboard (with their IDs, columns, rows)."""
+    return jira_list_dashboard_gadgets(dashboard_id)
+
+
+@safe_tool()
+def mcp_jira_add_dashboard_gadget(
+    dashboard_id: str, uri: str, color: str = "blue",
+    column: int | None = None, row: int | None = None, execute: bool = True,
+) -> dict:
+    """
+    Add a gadget (chart) to a dashboard. Get uri from mcp_jira_list_available_gadgets.
+
+    Common gadget URIs:
+      - rest/gadgets/1.0/g/com.atlassian.jira.gadgets:filter-results-gadget/gadgets/filter-results-gadget.xml
+      - rest/gadgets/1.0/g/com.atlassian.jira.gadgets:pie-chart-gadget/gadgets/pie-chart-gadget.xml
+      - rest/gadgets/1.0/g/com.atlassian.jira.gadgets:two-dimensional-stats-gadget/gadgets/two-dimensional-stats-gadget.xml
+      - rest/gadgets/1.0/g/com.atlassian.jira.gadgets:created-vs-resolved-chart-gadget/gadgets/created-vs-resolved-chart-gadget.xml
+      - rest/gadgets/1.0/g/com.atlassian.jira.gadgets:assigned-to-me-gadget/gadgets/assigned-to-me-gadget.xml
+      - rest/gadgets/1.0/g/com.atlassian.jira.gadgets:sprint-burndown-gadget/gadgets/sprint-burndown-gadget.xml
+    color: 'blue' | 'red' | 'yellow' | 'green' | 'transparent' | 'cyan' | 'gray'.
+    """
+    return jira_add_dashboard_gadget(dashboard_id, uri, color, column, row, execute)
+
+
+@safe_tool()
+def mcp_jira_move_dashboard_gadget(
+    dashboard_id: str, gadget_id: str,
+    column: int | None = None, row: int | None = None, color: str | None = None,
+    execute: bool = True,
+) -> dict:
+    """Move a gadget to a different column/row on a dashboard, or recolor it."""
+    return jira_move_dashboard_gadget(dashboard_id, gadget_id, column, row, color, execute)
+
+
+@safe_tool()
+def mcp_jira_remove_dashboard_gadget(dashboard_id: str, gadget_id: str, execute: bool = True) -> dict:
+    """Remove a gadget from a dashboard."""
+    return jira_remove_dashboard_gadget(dashboard_id, gadget_id, execute)
+
+
+@safe_tool()
+def mcp_jira_set_dashboard_gadget_prefs(
+    dashboard_id: str, gadget_id: str, prefs: dict, execute: bool = True,
+) -> dict:
+    """
+    Configure a gadget's preferences. Pass a flat dict of pref keys/values.
+
+    Example pref sets per common gadget:
+      filter-results-gadget: {'filterId': '10001', 'num': '10', 'columnNames': 'issuetype,key,summary,priority,status'}
+      pie-chart-gadget: {'filterId': '10001', 'statType': 'priority'}
+      two-dimensional-stats-gadget: {'filterId': '10001', 'xstattype': 'priority', 'ystattype': 'status', 'numberToShow': '5'}
+      created-vs-resolved-chart-gadget: {'projectOrFilterId': 'filter-10001', 'periodName': 'daily', 'daysprevious': '30', 'cumulative': 'true'}
+      assigned-to-me-gadget: {'num': '10'}
+    """
+    return jira_set_dashboard_gadget_prefs(dashboard_id, gadget_id, prefs, execute)
+
+
+# ── Lookup helpers (populate gadget configs) ────────────────────────────────
+
+@safe_tool()
+def mcp_jira_get_myself() -> dict:
+    """Get the currently authenticated Jira user (key, name, email)."""
+    return jira_get_myself()
+
+
+@safe_tool()
+def mcp_jira_search_users(query: str, max_results: int = 20) -> dict:
+    """Search Jira users by username/email/display name."""
+    return jira_search_users(query, max_results)
+
+
+@safe_tool()
+def mcp_jira_list_groups(query: str = "", max_results: int = 50) -> dict:
+    """List Jira groups (group picker) for share/edit permissions."""
+    return jira_list_groups(query, max_results)
+
+
+@safe_tool()
+def mcp_jira_list_projects() -> dict:
+    """List all Jira projects visible to the current user."""
+    return jira_list_projects()
+
+
+@safe_tool()
+def mcp_jira_list_statuses() -> dict:
+    """List all global issue statuses (id, name, category)."""
+    return jira_list_statuses()
+
+
+@safe_tool()
+def mcp_jira_list_priorities() -> dict:
+    """List all issue priorities."""
+    return jira_list_priorities()
+
+
+@safe_tool()
+def mcp_jira_list_issue_types() -> dict:
+    """List all issue types."""
+    return jira_list_issue_types()
+
+
+@safe_tool()
+def mcp_jira_list_fields() -> dict:
+    """List all Jira fields (system + custom). Returns id, name, custom flag."""
+    return jira_list_fields()
 
 
 # ============================================================================
