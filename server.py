@@ -1,11 +1,11 @@
 """
-Atlassian MCP Server — standalone, 87 tools over stdio/HTTP.
+Atlassian MCP Server — standalone, 110 tools over stdio/HTTP.
 
 Run:
   python server.py                    # stdio (default, for Cursor/Claude Code)
   MCP_TRANSPORT=streamable-http python server.py  # HTTP
 
-Covers: Jira typed (63) + Bitbucket (7) + Confluence (6) + Bamboo (7) + 4 raw passthroughs
+Covers: Jira typed (86) + Bitbucket (7) + Confluence (6) + Bamboo (7) + 4 raw passthroughs
 """
 import os
 
@@ -147,7 +147,7 @@ _mcp_transport = os.getenv("MCP_TRANSPORT", "stdio").strip().lower()
 
 mcp = FastMCP(
     "Atlassian",
-    instructions="Atlassian automation: Jira, Bitbucket, Confluence, Bamboo — 87 tools (typed + raw passthroughs) for complete SDLC management.",
+    instructions="Atlassian automation: Jira, Bitbucket, Confluence, Bamboo — 110 tools (typed + raw passthroughs) for complete SDLC management, including dashboard creation and gadget management.",
     host=_mcp_host,
     port=_mcp_port,
     json_response=True,
@@ -1100,7 +1100,7 @@ if __name__ == "__main__":
     logger.info("=" * 70)
     logger.info("Atlassian MCP Server starting (%s)", _mcp_transport)
     logger.info("=" * 70)
-    logger.info("87 tools: Jira(63) + Bitbucket(7) + Confluence(6) + Bamboo(7) + raw(4)")
+    logger.info("110 tools: Jira(86) + Bitbucket(7) + Confluence(6) + Bamboo(7) + raw(4)")
     logger.info("=" * 70)
 
     if _mcp_transport == "streamable-http":
