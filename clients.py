@@ -141,6 +141,22 @@ def confluence_client() -> httpx.Client | None:
     )
 
 
+def confluence_experimental_client() -> httpx.Client | None:
+    """Client for Confluence's /rest/experimental API (version history endpoints)."""
+    if not (CONFLUENCE_BASE_URL and CONFLUENCE_EMAIL and CONFLUENCE_TOKEN):
+        logger.debug("Confluence not configured")
+        return None
+
+    extra, auth = _auth_for(CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, CONFLUENCE_TOKEN)
+    return httpx.Client(
+        base_url=f"{CONFLUENCE_BASE_URL}/rest/experimental",
+        auth=auth,
+        headers={**_COMMON_HEADERS, **extra},
+        timeout=30.0,
+        verify=False,
+    )
+
+
 def bamboo_client() -> httpx.Client | None:
     if not (BAMBOO_BASE_URL and BAMBOO_USERNAME and BAMBOO_TOKEN):
         logger.debug("Bamboo not configured")

@@ -1,6 +1,6 @@
 # Atlassian MCP Server
 
-Standalone MCP server for Atlassian products (Jira, Bitbucket, Confluence, Bamboo) — 28 tools over stdio or HTTP.
+Standalone MCP server for Atlassian products (Jira, Bitbucket, Confluence, Bamboo) — 116 tools over stdio or HTTP.
 
 ## Quick Start
 
@@ -44,11 +44,17 @@ MCP_TRANSPORT=streamable-http python server.py
 | `mcp_bitbucket_merge_pr` | Merge a PR |
 | `mcp_bitbucket_list_repos` | List repositories |
 
-### Confluence (6)
+### Confluence (12)
 | Tool | Description |
 |------|-------------|
 | `mcp_confluence_search` | Search pages and content |
 | `mcp_confluence_get_page` | Get page by ID or title |
+| `mcp_confluence_get_page_versions` | List all versions of a page (number, author, when, message) |
+| `mcp_confluence_get_page_version` | Get body.storage of a specific historical version (recover reverted content) |
+| `mcp_confluence_get_child_pages` | List direct child pages |
+| `mcp_confluence_get_page_ancestors` | Get the breadcrumb chain (id/title) |
+| `mcp_confluence_get_attachments` | List page attachments |
+| `mcp_confluence_get_page_labels` | List page labels |
 | `mcp_confluence_create_page` | Create a new page |
 | `mcp_confluence_update_page` | Update an existing page |
 | `mcp_confluence_add_comment` | Add a page comment |

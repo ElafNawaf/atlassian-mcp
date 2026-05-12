@@ -23,7 +23,7 @@ A complete, beginner-friendly walkthrough: install everything from zero, run the
 
 ## 1. What you'll build
 
-A local server that exposes **110 Atlassian tools** (Jira, Bitbucket, Confluence, Bamboo) over the **MCP protocol**, so AI assistants can read/write your Atlassian data through natural language.
+A local server that exposes **116 Atlassian tools** (Jira, Bitbucket, Confluence, Bamboo) over the **MCP protocol**, so AI assistants can read/write your Atlassian data through natural language.
 
 Two ways the server can run:
 
@@ -435,7 +435,7 @@ chmod +x /Users/elafnawaf/PycharmProjects/atlassian-mcp/mcp-bridge.sh
 
 ### 9.4 Restart Claude Desktop
 
-Quit completely (⌘Q) and reopen. Look for the **🔌 plug icon** in the input bar — clicking it should list `atlassian` with all 110 tools available.
+Quit completely (⌘Q) and reopen. Look for the **🔌 plug icon** in the input bar — clicking it should list `atlassian` with all 116 tools available.
 
 ---
 

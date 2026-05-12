@@ -16,7 +16,7 @@ from config import (
 )
 from clients import (
     jira_client, jira_agile_client, jira_dashboards_client,
-    bitbucket_client, confluence_client, bamboo_client,
+    bitbucket_client, confluence_client, confluence_experimental_client, bamboo_client,
     is_bitbucket_server,
 )
 from audit import audit_log
@@ -1612,6 +1612,107 @@ def confluence_list_spaces(limit: int = 50) -> dict:
         r.raise_for_status()
         data = r.json()
     audit_log("confluence_list_spaces", {"limit": limit}, "success")
+    return data
+
+
+def confluence_get_page_versions(page_id: str, limit: int = 25) -> dict:
+    """List all versions of a Confluence page with version number, author, timestamp, and message."""
+    if MOCK_MODE:
+        return {"results": [
+            {"number": 3, "when": "2026-01-03T00:00:00Z", "by": {"displayName": "Mock User"}, "message": ""},
+            {"number": 2, "when": "2026-01-02T00:00:00Z", "by": {"displayName": "Mock User"}, "message": "revert"},
+            {"number": 1, "when": "2026-01-01T00:00:00Z", "by": {"displayName": "Mock User"}, "message": ""},
+        ], "size": 3, "limit": limit}
+    client = confluence_experimental_client()
+    if not client:
+        raise ValueError("Confluence not configured.")
+    with client as c:
+        r = c.get(f"/content/{page_id}/version", params={"limit": limit})
+        r.raise_for_status()
+        data = r.json()
+    audit_log("confluence_get_page_versions", {"page_id": page_id, "limit": limit}, "success")
+    return data
+
+
+def confluence_get_page_version(page_id: str, version_number: int) -> dict:
+    """Get the full body.storage content of a specific historical version of a Confluence page (for recovering reverted content)."""
+    if MOCK_MODE:
+        return {"number": version_number, "when": "2026-01-01T00:00:00Z", "by": {"displayName": "Mock User"},
+                "content": {"id": page_id, "title": "Sample Page",
+                            "body": {"storage": {"value": f"<p>Mock content at version {version_number}</p>", "representation": "storage"}}}}
+    client = confluence_experimental_client()
+    if not client:
+        raise ValueError("Confluence not configured.")
+    with client as c:
+        r = c.get(f"/content/{page_id}/version/{version_number}", params={"expand": "content.body.storage"})
+        r.raise_for_status()
+        data = r.json()
+    space_key = ((data.get("content") or {}).get("space") or {}).get("key")
+    if space_key:
+        _allow_space(space_key)
+    audit_log("confluence_get_page_version", {"page_id": page_id, "version_number": version_number}, "success")
+    return data
+
+
+def confluence_get_child_pages(page_id: str, limit: int = 50) -> dict:
+    """List the direct child pages of a Confluence page (with version and space info)."""
+    if MOCK_MODE:
+        return {"results": [{"id": "200", "title": "Child Page", "type": "page", "version": {"number": 1}}], "size": 1, "limit": limit}
+    client = confluence_client()
+    if not client:
+        raise ValueError("Confluence not configured.")
+    with client as c:
+        r = c.get(f"/content/{page_id}/child/page", params={"expand": "version,space", "limit": limit})
+        r.raise_for_status()
+        data = r.json()
+    audit_log("confluence_get_child_pages", {"page_id": page_id, "limit": limit}, "success")
+    return data
+
+
+def confluence_get_page_ancestors(page_id: str) -> dict:
+    """Get the ancestor (breadcrumb) chain of a Confluence page, simplified to id and title."""
+    if MOCK_MODE:
+        return {"page_id": page_id, "ancestors": [{"id": "1", "title": "Home"}, {"id": "2", "title": "Section"}]}
+    client = confluence_client()
+    if not client:
+        raise ValueError("Confluence not configured.")
+    with client as c:
+        r = c.get(f"/content/{page_id}", params={"expand": "ancestors"})
+        r.raise_for_status()
+        data = r.json()
+    ancestors = [{"id": a.get("id"), "title": a.get("title")} for a in data.get("ancestors", [])]
+    audit_log("confluence_get_page_ancestors", {"page_id": page_id}, "success")
+    return {"page_id": page_id, "ancestors": ancestors}
+
+
+def confluence_get_attachments(page_id: str, limit: int = 25) -> dict:
+    """List attachments on a Confluence page (id, title, mediaType, download link)."""
+    if MOCK_MODE:
+        return {"results": [{"id": "att1", "title": "diagram.png", "metadata": {"mediaType": "image/png"},
+                             "_links": {"download": "/download/attachments/1/diagram.png"}}], "size": 1, "limit": limit}
+    client = confluence_client()
+    if not client:
+        raise ValueError("Confluence not configured.")
+    with client as c:
+        r = c.get(f"/content/{page_id}/child/attachment", params={"limit": limit})
+        r.raise_for_status()
+        data = r.json()
+    audit_log("confluence_get_attachments", {"page_id": page_id, "limit": limit}, "success")
+    return data
+
+
+def confluence_get_page_labels(page_id: str) -> dict:
+    """List the labels attached to a Confluence page."""
+    if MOCK_MODE:
+        return {"results": [{"name": "technical-debt", "prefix": "global", "id": "1"}], "size": 1}
+    client = confluence_client()
+    if not client:
+        raise ValueError("Confluence not configured.")
+    with client as c:
+        r = c.get(f"/content/{page_id}/label")
+        r.raise_for_status()
+        data = r.json()
+    audit_log("confluence_get_page_labels", {"page_id": page_id}, "success")
     return data
 
 

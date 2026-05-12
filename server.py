@@ -1,11 +1,11 @@
 """
-Atlassian MCP Server — standalone, 110 tools over stdio/HTTP.
+Atlassian MCP Server — standalone, 116 tools over stdio/HTTP.
 
 Run:
   python server.py                    # stdio (default, for Cursor/Claude Code)
   MCP_TRANSPORT=streamable-http python server.py  # HTTP
 
-Covers: Jira typed (86) + Bitbucket (7) + Confluence (6) + Bamboo (7) + 4 raw passthroughs
+Covers: Jira typed (86) + Bitbucket (7) + Confluence (12) + Bamboo (7) + 4 raw passthroughs
 """
 import os
 
@@ -119,6 +119,12 @@ from tools import (
     # Confluence
     confluence_search,
     confluence_get_page,
+    confluence_get_page_versions,
+    confluence_get_page_version,
+    confluence_get_child_pages,
+    confluence_get_page_ancestors,
+    confluence_get_attachments,
+    confluence_get_page_labels,
     confluence_create_page,
     confluence_update_page,
     confluence_add_comment,
@@ -147,7 +153,7 @@ _mcp_transport = os.getenv("MCP_TRANSPORT", "stdio").strip().lower()
 
 mcp = FastMCP(
     "Atlassian",
-    instructions="Atlassian automation: Jira, Bitbucket, Confluence, Bamboo — 110 tools (typed + raw passthroughs) for complete SDLC management, including dashboard creation and gadget management.",
+    instructions="Atlassian automation: Jira, Bitbucket, Confluence, Bamboo — 116 tools (typed + raw passthroughs) for complete SDLC management, including dashboard creation and gadget management.",
     host=_mcp_host,
     port=_mcp_port,
     json_response=True,
@@ -936,7 +942,7 @@ def mcp_bitbucket_list_repos(limit: int = 50) -> dict:
 
 
 # ============================================================================
-# Confluence Tools (6)
+# Confluence Tools (12)
 # ============================================================================
 
 @safe_tool()
@@ -957,6 +963,51 @@ def mcp_confluence_get_page(page_id: str | None = None, space_key: str | None = 
     Provide either page_id OR (space_key + title).
     """
     return confluence_get_page(page_id, space_key, title)
+
+
+@safe_tool()
+def mcp_confluence_get_page_versions(page_id: str, limit: int = 25) -> dict:
+    """
+    List all versions of a Confluence page.
+
+    Returns each version's number, author, timestamp, and edit message.
+    Use mcp_confluence_get_page_version to fetch the content of a specific version.
+    """
+    return confluence_get_page_versions(page_id, limit)
+
+
+@safe_tool()
+def mcp_confluence_get_page_version(page_id: str, version_number: int) -> dict:
+    """
+    Get the full body.storage content of a specific historical version of a Confluence page.
+
+    Use this to recover content from a page that was reverted, or to diff two versions.
+    """
+    return confluence_get_page_version(page_id, version_number)
+
+
+@safe_tool()
+def mcp_confluence_get_child_pages(page_id: str, limit: int = 50) -> dict:
+    """List the direct child pages of a Confluence page (with version and space info)."""
+    return confluence_get_child_pages(page_id, limit)
+
+
+@safe_tool()
+def mcp_confluence_get_page_ancestors(page_id: str) -> dict:
+    """Get the ancestor (breadcrumb) chain of a Confluence page, simplified to id and title."""
+    return confluence_get_page_ancestors(page_id)
+
+
+@safe_tool()
+def mcp_confluence_get_attachments(page_id: str, limit: int = 25) -> dict:
+    """List attachments on a Confluence page (id, title, mediaType, download link)."""
+    return confluence_get_attachments(page_id, limit)
+
+
+@safe_tool()
+def mcp_confluence_get_page_labels(page_id: str) -> dict:
+    """List the labels attached to a Confluence page."""
+    return confluence_get_page_labels(page_id)
 
 
 @safe_tool()
@@ -1100,7 +1151,7 @@ if __name__ == "__main__":
     logger.info("=" * 70)
     logger.info("Atlassian MCP Server starting (%s)", _mcp_transport)
     logger.info("=" * 70)
-    logger.info("110 tools: Jira(86) + Bitbucket(7) + Confluence(6) + Bamboo(7) + raw(4)")
+    logger.info("116 tools: Jira(86) + Bitbucket(7) + Confluence(12) + Bamboo(7) + raw(4)")
     logger.info("=" * 70)
 
     if _mcp_transport == "streamable-http":
