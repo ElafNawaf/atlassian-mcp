@@ -1,6 +1,6 @@
 # Atlassian MCP Server
 
-Standalone MCP server for Atlassian products (Jira, Bitbucket, Confluence, Bamboo) — 116 tools over stdio or HTTP.
+Standalone MCP server for Atlassian products (Jira, Bitbucket, Confluence, Bamboo) — 119 tools over stdio or HTTP.
 
 ## Quick Start
 
@@ -44,7 +44,7 @@ MCP_TRANSPORT=streamable-http python server.py
 | `mcp_bitbucket_merge_pr` | Merge a PR |
 | `mcp_bitbucket_list_repos` | List repositories |
 
-### Confluence (12)
+### Confluence (15)
 | Tool | Description |
 |------|-------------|
 | `mcp_confluence_search` | Search pages and content |
@@ -55,10 +55,15 @@ MCP_TRANSPORT=streamable-http python server.py
 | `mcp_confluence_get_page_ancestors` | Get the breadcrumb chain (id/title) |
 | `mcp_confluence_get_attachments` | List page attachments |
 | `mcp_confluence_get_page_labels` | List page labels |
+| `mcp_confluence_update_page_from_file` | Update a page from storage-format XML in a local file (large payloads) |
+| `mcp_confluence_raw_from_file` | Call any Confluence endpoint with a JSON body from a local file (large payloads) |
+| `mcp_confluence_get_page_to_file` | Fetch a page and write its body to a local file (backup-before-update) |
 | `mcp_confluence_create_page` | Create a new page |
 | `mcp_confluence_update_page` | Update an existing page |
 | `mcp_confluence_add_comment` | Add a page comment |
 | `mcp_confluence_list_spaces` | List spaces |
+
+> **Large pages:** MCP truncates tool arguments around ~100 KB. For page bodies bigger than ~10 KB, stage the storage-format XML in a local file and use `mcp_confluence_update_page_from_file` (or `mcp_confluence_raw_from_file` for arbitrary endpoints). Both are dry-run by default and capped at 5 MB. Use `mcp_confluence_get_page_to_file` to snapshot the current body first.
 
 ### Bamboo (7)
 | Tool | Description |

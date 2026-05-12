@@ -1,11 +1,11 @@
 """
-Atlassian MCP Server — standalone, 116 tools over stdio/HTTP.
+Atlassian MCP Server — standalone, 119 tools over stdio/HTTP.
 
 Run:
   python server.py                    # stdio (default, for Cursor/Claude Code)
   MCP_TRANSPORT=streamable-http python server.py  # HTTP
 
-Covers: Jira typed (86) + Bitbucket (7) + Confluence (12) + Bamboo (7) + 4 raw passthroughs
+Covers: Jira typed (86) + Bitbucket (7) + Confluence (15) + Bamboo (7) + 4 raw passthroughs
 """
 import os
 
@@ -125,6 +125,9 @@ from tools import (
     confluence_get_page_ancestors,
     confluence_get_attachments,
     confluence_get_page_labels,
+    confluence_update_page_from_file,
+    confluence_raw_from_file,
+    confluence_get_page_to_file,
     confluence_create_page,
     confluence_update_page,
     confluence_add_comment,
@@ -153,7 +156,7 @@ _mcp_transport = os.getenv("MCP_TRANSPORT", "stdio").strip().lower()
 
 mcp = FastMCP(
     "Atlassian",
-    instructions="Atlassian automation: Jira, Bitbucket, Confluence, Bamboo — 116 tools (typed + raw passthroughs) for complete SDLC management, including dashboard creation and gadget management.",
+    instructions="Atlassian automation: Jira, Bitbucket, Confluence, Bamboo — 119 tools (typed + raw passthroughs) for complete SDLC management, including dashboard creation and gadget management.",
     host=_mcp_host,
     port=_mcp_port,
     json_response=True,
@@ -942,7 +945,7 @@ def mcp_bitbucket_list_repos(limit: int = 50) -> dict:
 
 
 # ============================================================================
-# Confluence Tools (12)
+# Confluence Tools (15)
 # ============================================================================
 
 @safe_tool()
@@ -1008,6 +1011,54 @@ def mcp_confluence_get_attachments(page_id: str, limit: int = 25) -> dict:
 def mcp_confluence_get_page_labels(page_id: str) -> dict:
     """List the labels attached to a Confluence page."""
     return confluence_get_page_labels(page_id)
+
+
+@safe_tool()
+def mcp_confluence_update_page_from_file(
+    page_id: str, title: str, version: int, content_file: str,
+    execute: bool = False, message: str | None = None,
+) -> dict:
+    """
+    Update a Confluence page with storage-format XML read from a local file.
+
+    Use this instead of mcp_confluence_update_page when the page body is large (>10KB):
+    inline tool arguments get truncated at the MCP transport boundary. `version` is the
+    target version number (current version + 1). Dry-run by default — set execute=true
+    (and WORKGRAPH_MODE=EXECUTE) to publish. The dry-run response shows path, version,
+    char count, and a head/tail preview, not the full content.
+    """
+    return confluence_update_page_from_file(page_id, title, version, content_file, execute, message)
+
+
+@safe_tool()
+def mcp_confluence_raw_from_file(
+    method: str, path: str, body_file: str,
+    params: dict | None = None, execute: bool = False,
+) -> dict:
+    """
+    Call any Confluence REST endpoint with a JSON request body read from a local file.
+
+    Use this when the request body is large (>10KB) and would be truncated as an inline
+    tool argument. The file must contain valid JSON (validated before sending). path is
+    relative to /rest/api. Write methods are dry-run by default — set execute=true (and
+    WORKGRAPH_MODE=EXECUTE) to send. The dry-run response shows method, path, params,
+    char count, and the body's top-level keys.
+    """
+    return confluence_raw_from_file(method, path, body_file, params, execute)
+
+
+@safe_tool()
+def mcp_confluence_get_page_to_file(
+    page_id: str, output_file: str, expand: str = "body.storage,version,space",
+) -> dict:
+    """
+    Fetch a Confluence page and write its storage-format body to a local file.
+
+    Use this for backup-before-update workflows, or when the page body is too large to
+    return inline as a tool result. Returns page metadata (id, title, version, chars
+    written) without the body itself.
+    """
+    return confluence_get_page_to_file(page_id, output_file, expand)
 
 
 @safe_tool()
@@ -1151,7 +1202,7 @@ if __name__ == "__main__":
     logger.info("=" * 70)
     logger.info("Atlassian MCP Server starting (%s)", _mcp_transport)
     logger.info("=" * 70)
-    logger.info("116 tools: Jira(86) + Bitbucket(7) + Confluence(12) + Bamboo(7) + raw(4)")
+    logger.info("119 tools: Jira(86) + Bitbucket(7) + Confluence(15) + Bamboo(7) + raw(4)")
     logger.info("=" * 70)
 
     if _mcp_transport == "streamable-http":

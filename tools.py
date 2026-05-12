@@ -2,6 +2,8 @@
 
 Standalone — reads credentials from .env via config.py, no database needed.
 """
+import json
+import os
 from typing import Any
 
 from config import (
@@ -1714,6 +1716,143 @@ def confluence_get_page_labels(page_id: str) -> dict:
         data = r.json()
     audit_log("confluence_get_page_labels", {"page_id": page_id}, "success")
     return data
+
+
+# ── Confluence file-based tools (for payloads too large for MCP tool args) ────
+
+_MAX_CONTENT_FILE_BYTES = 5 * 1024 * 1024  # 5 MB safety cap
+
+
+def _read_local_file(path: str) -> tuple[str | None, dict | None]:
+    """Read a UTF-8 text file with validation. Returns (content, None) or (None, error_dict)."""
+    if not isinstance(path, str) or not path:
+        return None, {"error": True, "type": "file_error", "message": "No file path provided."}
+    if not os.path.isfile(path):
+        return None, {"error": True, "type": "file_error", "message": f"File not found: {path}"}
+    try:
+        size = os.path.getsize(path)
+    except OSError as e:
+        return None, {"error": True, "type": "file_error", "message": f"Cannot stat {path}: {e}"}
+    if size == 0:
+        return None, {"error": True, "type": "file_error", "message": f"File is empty: {path}"}
+    if size > _MAX_CONTENT_FILE_BYTES:
+        return None, {"error": True, "type": "file_error",
+                      "message": f"File exceeds 5 MB cap ({size} bytes): {path}"}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read(), None
+    except (OSError, UnicodeDecodeError) as e:
+        return None, {"error": True, "type": "file_error", "message": f"Cannot read {path}: {e}"}
+
+
+def confluence_update_page_from_file(page_id: str, title: str, version: int, content_file: str,
+                                     execute: bool = False, message: str | None = None) -> dict:
+    """Update a Confluence page using storage-format XML read from a local file.
+
+    Use this when the page body is large (>10KB) — passing it inline as a tool argument
+    risks truncation at the MCP transport boundary. `version` is the target version number
+    (the page's current version + 1, since Confluence requires a strict increment).
+    Dry-run by default; set execute=true (and WORKGRAPH_MODE=EXECUTE) to publish.
+    """
+    content, err = _read_local_file(content_file)
+    if err:
+        return err
+    if not content.strip():
+        return {"error": True, "type": "file_error", "message": f"File has no usable content: {content_file}"}
+
+    path = f"/content/{page_id}"
+    if not execute:
+        audit_log("confluence_update_page_from_file", {"page_id": page_id, "chars": len(content)}, "success")
+        return {
+            "dryRun": True, "method": "PUT", "path": path, "pageId": page_id,
+            "version": version, "title": title, "contentChars": len(content),
+            "preview": {"head": content[:200], "tail": content[-200:] if len(content) > 200 else ""},
+        }
+    if not is_execute_allowed():
+        return {"dryRun": True, "message": "WORKGRAPH_MODE is DRY_RUN. Set EXECUTE and execute=true to publish."}
+    if MOCK_MODE:
+        return {"updated": True}
+
+    client = confluence_client()
+    if not client:
+        raise ValueError("Confluence not configured.")
+    payload = {
+        "version": {"number": version, "message": message or ""},
+        "title": title,
+        "type": "page",
+        "body": {"storage": {"value": content, "representation": "storage"}},
+    }
+    with client as c:
+        c.put(path, json=payload).raise_for_status()
+    audit_log("confluence_update_page_from_file", {"page_id": page_id, "chars": len(content)}, "success")
+    return {"updated": True}
+
+
+def confluence_raw_from_file(method: str, path: str, body_file: str,
+                             params: dict | None = None, execute: bool = False) -> dict:
+    """Call any Confluence REST endpoint with a JSON request body read from a local file.
+
+    Use this when the request body is large (>10KB) and would be truncated as an inline
+    tool argument. The file must contain valid JSON (validated before sending). path is
+    relative to /rest/api. Write methods are dry-run by default; set execute=true (and
+    WORKGRAPH_MODE=EXECUTE) to send.
+    """
+    raw, err = _read_local_file(body_file)
+    if err:
+        return err
+    try:
+        body = json.loads(raw)
+    except json.JSONDecodeError as e:
+        return {"error": True, "type": "json_error", "message": f"Body file is not valid JSON: {e}"}
+
+    method_u = (method or "").upper()
+    if not execute:
+        audit_log("confluence_raw_from_file", {"method": method_u, "path": path, "chars": len(raw)}, "success")
+        return {
+            "dryRun": True, "method": method_u, "path": path, "params": params,
+            "contentChars": len(raw),
+            "bodyTopLevelKeys": list(body.keys()) if isinstance(body, dict) else None,
+        }
+    return _raw("confluence_raw_from_file", confluence_client, method, path, params, body, execute=True)
+
+
+def confluence_get_page_to_file(page_id: str, output_file: str,
+                                expand: str = "body.storage,version,space") -> dict:
+    """Fetch a Confluence page and write its storage-format body to a local file.
+
+    Use this for backup-before-update workflows, or when the page body is too large to
+    return inline as a tool result. Returns page metadata (id, title, version, chars
+    written) WITHOUT the body itself.
+    """
+    if MOCK_MODE:
+        body_val = "<p>Mock content</p>"
+        meta = {"id": page_id, "title": "Sample Page", "version": 1}
+    else:
+        client = confluence_client()
+        if not client:
+            raise ValueError("Confluence not configured.")
+        with client as c:
+            r = c.get(f"/content/{page_id}", params={"expand": expand})
+            r.raise_for_status()
+            data = r.json()
+        space_key = (data.get("space") or {}).get("key")
+        if space_key:
+            _allow_space(space_key)
+        body_val = (((data.get("body") or {}).get("storage") or {}).get("value"))
+        if body_val is None:
+            return {"error": True, "type": "response_error",
+                    "message": "Page response did not contain body.storage.value — check the expand parameter."}
+        meta = {"id": data.get("id", page_id), "title": data.get("title"),
+                "version": (data.get("version") or {}).get("number")}
+
+    try:
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(body_val)
+    except OSError as e:
+        return {"error": True, "type": "file_error", "message": f"Cannot write {output_file}: {e}"}
+    audit_log("confluence_get_page_to_file",
+              {"page_id": page_id, "output_file": output_file, "chars": len(body_val)}, "success")
+    return {**meta, "outputFile": output_file, "contentChars": len(body_val)}
 
 
 # ============================================================================
